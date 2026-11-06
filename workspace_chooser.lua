@@ -1,12 +1,16 @@
+local prefix = (...):match("^(.*%.)") or ""
+local I18n = require(prefix .. "i18n")
+local Picker = require(prefix .. "canvas_picker")
 local M = {}
 
 function M.new(hs, config, cli, icons, logger)
+    local locale = I18n.new(hs)
     local self = { cache = nil, active = false, moving = false, epoch = 0, stopped = false,
-        metrics = {}, refreshWaiters = {} }
+        metrics = {}, refreshWaiters = {}, language = locale.language }
     local function now() return hs.timer.absoluteTime() / 1e6 end
     local function notify(err)
         logger.w(tostring(err))
-        hs.alert.show("OmniWM: " .. tostring(err), 4)
+        hs.alert.show("OmniWM: " .. locale:error(err), 4)
     end
     local function metric(key, started)
         self.metrics[key] = now() - started
@@ -21,23 +25,29 @@ function M.new(hs, config, cli, icons, logger)
             if (config.showCurrentWorkspace or not current)
                 and (config.showEmptyWorkspaces or (ws.count or #ws.apps) > 0) then
                 local names = {}
-                for _, app in ipairs(ws.apps) do names[#names + 1] = app.name end
+                for _, app in ipairs(ws.apps) do
+                    names[#names + 1] = app.name == "Unknown app" and locale:text("unknownApp") or app.name
+                end
                 local text = tostring(ws.number)
                 if ws.name ~= text then text = text .. " — " .. ws.name end
                 if current then text = "● " .. text end
-                local subText = #names > 0 and table.concat(names, ", ") or "Нет приложений"
-                if ws.displayName ~= "" then subText = subText .. " · " .. ws.displayName end
+                local subText = ws.displayName
+                local searchText = text .. " " .. subText
+                if config.searchAppNames then searchText = searchText .. " " .. table.concat(names, " ") end
                 local ok, image = pcall(icons.composite, icons, ws.apps)
                 if not ok then logger.w("Icon rendering failed: " .. tostring(image)); image = nil end
-                choices[#choices + 1] = { text = text, subText = subText, image = image, workspaceId = ws.id }
-                fingerprint[#fingerprint + 1] = { ws.id, text, subText, ws.apps }
+                local cells = math.max(1, math.min(#ws.apps, config.maxIcons)) + (#ws.apps > config.maxIcons and 1 or 0)
+                choices[#choices + 1] = { text = text, subText = subText, searchText = searchText,
+                    image = image, imageWidth = cells * config.iconSize, workspaceId = ws.id,
+                    displayId = ws.displayId, displayName = ws.displayName }
+                fingerprint[#fingerprint + 1] = { ws.id, text, subText, ws.displayId, ws.apps }
             end
         end
         local signature = hs.json.encode(fingerprint)
         if signature == self.signature then return end
         self.signature = signature
         if #choices == 0 then
-            choices = { { text = "Нет доступных назначений", subText = "Проверьте настройки фильтрации", valid = false } }
+            choices = { { text = locale:text("noDestinations"), subText = locale:text("filters"), valid = false } }
         end
         local query = self.chooser:query()
         local selected = self.chooser:selectedRowContents()
@@ -76,7 +86,7 @@ function M.new(hs, config, cli, icons, logger)
         end)
     end
 
-    self.chooser = hs.chooser.new(function(choice)
+    self.chooser = Picker.new(hs, config, locale, function(choice)
         if self.stopped then return end
         local source = self.source
         self.active, self.source = false, nil
@@ -84,7 +94,7 @@ function M.new(hs, config, cli, icons, logger)
         if not choice or not choice.workspaceId or not source then return end
         self.moving = true
         local started = now()
-        -- hs.chooser closes before invoking its completion callback.
+        -- The non-activating palette is hidden before focus restoration.
         cli:move(source, choice.workspaceId, function(ok, err)
             if self.stopped then return end
             self.moving = false
@@ -93,12 +103,6 @@ function M.new(hs, config, cli, icons, logger)
             self:refresh()
         end)
     end)
-    self.chooser:rows(config.rows):width(config.width):bgDark(config.theme == "dark")
-        :searchSubText(config.searchAppNames):enableDefaultForQuery(false)
-        :placeholderText("Перенести колонку → workspace…")
-        :fgColor({ white = config.theme == "dark" and 0.95 or 0.1 })
-        :subTextColor({ white = config.theme == "dark" and 0.65 or 0.4 })
-        :invalidCallback(function() end)
 
     function self:cancel()
         self.active, self.source = false, nil
@@ -139,8 +143,8 @@ function M.new(hs, config, cli, icons, logger)
                         end)
                     end
                 else
-                    -- Safe loading row: source was captured before chooser stole focus.
-                    self.chooser:choices({ { text = "Загрузка воркспейсов…", valid = false } }):show()
+                    -- Loading rows cannot be selected.
+                    self.chooser:choices({ { text = locale:text("loading"), valid = false } }):show()
                     self:refresh(function(workspaces, refreshError)
                         if not valid() then return end
                         if not workspaces then fail(refreshError); return end

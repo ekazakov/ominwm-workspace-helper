@@ -48,8 +48,8 @@ function M.new(hs, config)
         if count == 0 then images[1], count = placeholder(), 1 end
         local overflow = math.max(0, #apps - config.maxIcons)
         local cells = count + (overflow > 0 and 1 or 0)
-        local cols = math.min(3, cells)
-        local rows = math.ceil(cells / cols)
+        local cols = cells
+        local rows = 1
         local elements = {}
         for i, image in ipairs(images) do
             elements[#elements + 1] = { type = "image", image = image, imageScaling = "scaleProportionally",

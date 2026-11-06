@@ -34,7 +34,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 source_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
-modules=(init.lua config.lua omniwm.lua normalize.lua workspace_chooser.lua icons.lua cache.lua)
+modules=(init.lua config.lua omniwm.lua normalize.lua workspace_chooser.lua icons.lua cache.lua i18n.lua canvas_picker.lua)
 for file in "${modules[@]}" examples/hammerspoon-init.lua; do
     [[ -f "$source_dir/$file" ]] || fail "Missing source file: $source_dir/$file"
 done

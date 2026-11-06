@@ -19,9 +19,10 @@ function M.new(overrides)
         assert(defaults[key] ~= nil or key == "cliPath", "Unknown config key: " .. tostring(key))
         config[key] = copy(value)
     end
-    for _, key in ipairs({ "maxIcons", "iconSize", "iconCacheLimit", "compositeCacheLimit", "rows", "width" }) do
+    for _, key in ipairs({ "maxIcons", "iconSize", "iconCacheLimit", "compositeCacheLimit", "rows" }) do
         assert(type(config[key]) == "number" and config[key] >= 1 and config[key] % 1 == 0, "Invalid " .. key)
     end
+    assert(type(config.width) == "number" and config.width > 0 and config.width <= 100, "Invalid width")
     assert(config.maxIcons <= 5, "maxIcons must be between 1 and 5")
     assert(config.theme == "dark" or config.theme == "light", "theme must be dark or light")
     assert(type(config.taskTimeout) == "number" and config.taskTimeout > 0, "Invalid taskTimeout")
@@ -65,6 +66,7 @@ function M.new(overrides)
     end
     function self:diagnostics()
         return { running = self.running, cliPath = self.cli and self.cli.path,
+            language = self.ui and self.ui.language,
             compatible = self.cli and self.cli.ready or false,
             workspaces = self.ui and self.ui.cache and #self.ui.cache or 0,
             metrics = self.ui and copy(self.ui.metrics) or {},

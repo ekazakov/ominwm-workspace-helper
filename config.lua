@@ -14,5 +14,5 @@ return {
     iconCacheLimit = 128,
     compositeCacheLimit = 128,
     rows = 8,
-    width = 48,
+    width = 28.8,
 }
