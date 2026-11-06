@@ -32,6 +32,20 @@ function M.new(hs, config, logger)
     function self:run(args, callback, raw)
         if self.stopped then return end
         if not self.path then callback(nil, self.pathError); return end
+        -- Queries and mutations both default to human-readable output in 0.7.6.
+        -- Apply the format here so focus/move cannot accidentally return plain text.
+        local taskArgs = {}
+        for _, arg in ipairs(args) do taskArgs[#taskArgs + 1] = arg end
+        if not raw then
+            taskArgs[#taskArgs + 1] = "--format"
+            taskArgs[#taskArgs + 1] = "json"
+        end
+        local command = "omniwmctl " .. table.concat(args, " ")
+        local function preview(value)
+            local text = (value or ""):gsub("%s+", " "):match("^%s*(.-)%s*$")
+            if text == "" then return "<empty>" end
+            return text:sub(1, 240)
+        end
         local request = { done = false }
         local function finish(value, err)
             if request.done or self.stopped then return end
@@ -44,17 +58,28 @@ function M.new(hs, config, logger)
         local ok, task = pcall(hs.task.new, self.path, function(code, stdout, stderr)
             if request.done or self.stopped then return end
             local decoded, decodeError
-            if not raw then decoded, decodeError = safe(hs.json.decode, stdout or "") end
+            if not raw then
+                -- Empty output cannot be JSON; report it without invoking LuaSkin's decoder.
+                if (stdout or ""):find("%S") then
+                    decoded, decodeError = safe(hs.json.decode, stdout)
+                else
+                    decodeError = "empty stdout"
+                end
+            end
             if code ~= 0 then
-                finish(nil, "omniwmctl exit " .. code .. ": " .. tostring(
-                    type(decoded) == "table" and (decoded.message or decoded.code) or stderr or stdout))
+                local message = type(decoded) == "table" and (decoded.message or decoded.code)
+                finish(nil, command .. " (exit " .. code .. "): " .. tostring(message
+                    or ((stderr or ""):find("%S") and preview(stderr)) or preview(stdout)))
             elseif raw then finish(stdout)
-            elseif not decoded then finish(nil, "Invalid CLI JSON: " .. tostring(decodeError or "empty response"))
+            elseif not decoded then
+                finish(nil, "Invalid CLI JSON from " .. command .. " (exit " .. code .. "): "
+                    .. tostring(decodeError or "decoder rejected response")
+                    .. "; stdout=" .. preview(stdout) .. "; stderr=" .. preview(stderr))
             else
                 local result, err = safe(N.unwrap, decoded, args[1] == "query" and args[2] or nil)
                 finish(result, err)
             end
-        end, args)
+        end, taskArgs)
         if not ok or not task then finish(nil, "Cannot create omniwmctl task: " .. tostring(task)); return end
         request.task = task
         self.tasks[request] = true
@@ -68,7 +93,6 @@ function M.new(hs, config, logger)
     function self:query(kind, callback, selectors)
         local args = { "query", kind }
         for _, arg in ipairs(selectors or {}) do args[#args + 1] = arg end
-        args[#args + 1], args[#args + 2] = "--format", "json"
         self:run(args, callback)
     end
 

@@ -11,18 +11,25 @@
 Из папки проекта:
 
 ```sh
-mkdir -p "$HOME/.hammerspoon/omniwm-workspace-chooser"
-cp ./*.lua "$HOME/.hammerspoon/omniwm-workspace-chooser/"
+./setup.sh
 ```
 
-Добавьте в `~/.hammerspoon/init.lua`:
+Скрипт копирует runtime-модули в `~/.hammerspoon/omniwm-workspace-chooser`, создаёт отдельную конфигурацию `~/.hammerspoon/omniwm-workspace-chooser-config.lua` и подключает её из `init.lua`. Перед обновлением существующие модули и `init.lua` сохраняются в каталог резервной копии; путь выводится в Terminal. Повторный запуск сохраняет пользовательскую конфигурацию и не добавляет повторный loader. Если в `init.lua` уже найдено упоминание расширения, скрипт оставляет подключение без изменений — проверьте существующий loader самостоятельно.
+
+Для нестандартного расположения конфигурации Hammerspoon:
+
+```sh
+./setup.sh --config-dir "/path/to/hammerspoon"
+```
+
+Скрипт устанавливает файлы расширения; Hammerspoon и OmniWM должны быть установлены отдельно. После установки настройки можно изменить в `omniwm-workspace-chooser-config.lua`:
 
 ```lua
 if omniwmWorkspaceChooser then omniwmWorkspaceChooser:stop() end
 
 omniwmWorkspaceChooser = require("omniwm-workspace-chooser").new({
     hotkey = {
-        modifiers = { "ctrl", "alt", "shift", "cmd" },
+        modifiers = { "ctrl", "alt", "shift" },
         key = "W",
     },
     maxIcons = 5,
@@ -32,7 +39,7 @@ omniwmWorkspaceChooser = require("omniwm-workspace-chooser").new({
 }):start()
 ```
 
-Полный готовый фрагмент: [examples/hammerspoon-init.lua](examples/hammerspoon-init.lua). Перезагрузите конфигурацию через **Reload Config** в меню Hammerspoon.
+Полный готовый фрагмент: [examples/hammerspoon-init.lua](examples/hammerspoon-init.lua). При ручной установке скопируйте файлы `*.lua` в `~/.hammerspoon/omniwm-workspace-chooser` и добавьте этот фрагмент в `~/.hammerspoon/init.lua`. Перезагрузите конфигурацию через **Reload Config** в меню Hammerspoon.
 
 В **System Settings → Privacy & Security → Accessibility** разрешите доступ Hammerspoon и OmniWM. Если macOS дополнительно запросит разрешение на обработку клавиатурного ввода, предоставьте его Hammerspoon. OmniWM должен уже управлять окнами и отвечать на CLI-запросы.
 
@@ -42,23 +49,23 @@ omniwmWorkspaceChooser = require("omniwm-workspace-chooser").new({
 
 Параметры передаются в `.new({...})`; значения по умолчанию находятся в [config.lua](config.lua).
 
-| Параметр | По умолчанию | Назначение |
-| --- | --- | --- |
-| `hotkey` | Hyper + W | `modifiers` и `key` для `hs.hotkey` |
-| `maxIcons` | `5` | От 1 до 5 приложений; остальные обозначаются `+N` |
-| `iconSize` | `22` | Размер ячейки изображения в pt до масштабирования chooser |
-| `theme` | `"dark"` | `"dark"` или `"light"` |
-| `showEmptyWorkspaces` | `true` | Показывать пустые workspace |
-| `showCurrentWorkspace` | `true` | Показывать workspace источника |
-| `searchAppNames` | `true` | Включать штатный поиск по `subText` с названиями приложений |
-| `refreshOnOpen` | `true` | Обновлять данные после открытия из кеша |
-| `debug` | `false` | Выводить измерения в Hammerspoon Console |
-| `cliPath` | `nil` | Полный путь; иначе поиск в стандартных каталогах и `PATH` |
-| `taskTimeout` | `5` | Таймаут одного CLI-запроса, секунды |
-| `iconCacheLimit` | `128` | Максимум записей кеша приложений |
-| `compositeCacheLimit` | `128` | Максимум записей кеша составных изображений |
-| `rows` | `8` | Число видимых строк |
-| `width` | `48` | Ширина chooser в процентах экрана |
+| Параметр               | По умолчанию | Назначение                                                  |
+| ---------------------- | ------------ | ----------------------------------------------------------- |
+| `hotkey`               | Hyper + W    | `modifiers` и `key` для `hs.hotkey`                         |
+| `maxIcons`             | `5`          | От 1 до 5 приложений; остальные обозначаются `+N`           |
+| `iconSize`             | `22`         | Размер ячейки изображения в pt до масштабирования chooser   |
+| `theme`                | `"dark"`     | `"dark"` или `"light"`                                      |
+| `showEmptyWorkspaces`  | `true`       | Показывать пустые workspace                                 |
+| `showCurrentWorkspace` | `true`       | Показывать workspace источника                              |
+| `searchAppNames`       | `true`       | Включать штатный поиск по `subText` с названиями приложений |
+| `refreshOnOpen`        | `true`       | Обновлять данные после открытия из кеша                     |
+| `debug`                | `false`      | Выводить измерения в Hammerspoon Console                    |
+| `cliPath`              | `nil`        | Полный путь; иначе поиск в стандартных каталогах и `PATH`   |
+| `taskTimeout`          | `5`          | Таймаут одного CLI-запроса, секунды                         |
+| `iconCacheLimit`       | `128`        | Максимум записей кеша приложений                            |
+| `compositeCacheLimit`  | `128`        | Максимум записей кеша составных изображений                 |
+| `rows`                 | `8`          | Число видимых строк                                         |
+| `width`                | `48`         | Ширина chooser в процентах экрана                           |
 
 Иконки объединены в компактную мозаику. Стандартный `hs.chooser` ограничивает область `image` и масштабирует составное изображение: фактический размер отдельных значков может быть меньше `iconSize`. Широкую строку из пяти полноразмерных иконок этот MVP не обещает. Длинные имена сохраняются целиком в данных поиска; видимый текст обрезает стандартный chooser. Unicode и emoji не обрезаются вручную.
 
@@ -114,15 +121,15 @@ hs.inspect(omniwmWorkspaceChooser:diagnostics())
 
 Результат содержит путь CLI, совместимость, число workspace, размеры кешей, число построений изображений и последние измерения в миллисекундах: `coldOpenMs`, `warmOpenMs`, `refreshMs`, `moveMs`. Включите `debug = true` перед `start()`, чтобы видеть их в журнале. `coldOpenMs` измеряет готовность списка, а не появление строки загрузки; `moveMs` — время до ответа команды, а не завершение анимации macOS.
 
-| Симптом | Что проверить |
-| --- | --- |
-| `omniwmctl not found` | `command -v omniwmctl`; задайте полный `cliPath` |
-| `transport_failure`, timeout | OmniWM запущен, IPC доступен, CLI работает из Terminal |
-| `Supported OmniWM version...` | MVP разрешает только 0.7.6/protocol 19; для новой версии нужна проверка схем и команд |
-| `No native window focused` | Accessibility Hammerspoon и фокус обычного окна приложения |
-| `Source window is not in a Niri column` | Niri, tiled-окно, отсутствие floating/scratchpad; наличие `columnIndex` в `query windows` |
-| `Source column changed...` | Повторите выбор: во время меню изменился состав или положение колонки |
-| `Could not confirm original column focus` | Восстановление фокуса не подтверждено; перенос отменён |
+| Симптом                                   | Что проверить                                                                             |
+| ----------------------------------------- | ----------------------------------------------------------------------------------------- |
+| `omniwmctl not found`                     | `command -v omniwmctl`; задайте полный `cliPath`                                          |
+| `transport_failure`, timeout              | OmniWM запущен, IPC доступен, CLI работает из Terminal                                    |
+| `Supported OmniWM version...`             | MVP разрешает только 0.7.6/protocol 19; для новой версии нужна проверка схем и команд     |
+| `No native window focused`                | Accessibility Hammerspoon и фокус обычного окна приложения                                |
+| `Source window is not in a Niri column`   | Niri, tiled-окно, отсутствие floating/scratchpad; наличие `columnIndex` в `query windows` |
+| `Source column changed...`                | Повторите выбор: во время меню изменился состав или положение колонки                     |
+| `Could not confirm original column focus` | Восстановление фокуса не подтверждено; перенос отменён                                    |
 
 Для отображения chooser поверх native fullscreen окон Hammerspoon документирует `hs.dockicon.hide()`. Это пользовательская настройка Hammerspoon; см. [hs.chooser](https://www.hammerspoon.org/docs/hs.chooser.html). API процессов и композиции: [hs.task](https://www.hammerspoon.org/docs/hs.task.html), [hs.canvas](https://www.hammerspoon.org/docs/hs.canvas.html).
 
