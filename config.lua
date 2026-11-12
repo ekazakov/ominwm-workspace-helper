@@ -2,6 +2,8 @@
 return {
     hotkey = { modifiers = { "ctrl", "alt", "shift" }, key = "W" },
     switchHotkey = { modifiers = { "ctrl", "alt", "shift", "cmd" }, key = "W" },
+    switchDoublePress = { enabled = true, modifiers = { "cmd" }, keyCode = 54, intervalMs = 200 },
+    shortcutSequenceTimeoutMs = 300,
     maxIcons = 5,
     iconSize = 22,
     theme = "dark",

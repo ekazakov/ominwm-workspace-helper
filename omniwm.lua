@@ -151,6 +151,25 @@ function M.new(hs, config, logger)
         end)
     end
 
+    function self:focusWindow(target, callback)
+        self:query("windows", function(payload, err)
+            if not payload then callback(nil, err); return end
+            if type(payload.windows) ~= "table" then callback(nil, "Unexpected windows structure"); return end
+            for _, window in ipairs(payload.windows) do
+                if window.id == target.id then
+                    if tonumber(window.windowId) ~= target.windowId then
+                        callback(nil, "Target window identity changed"); return
+                    end
+                    self:run({ "window", "focus", target.id }, function(result, focusError)
+                        callback(result ~= nil and true or nil, focusError)
+                    end)
+                    return
+                end
+            end
+            callback(nil, "Target window has closed")
+        end)
+    end
+
     function self:switch(destinationId, callback)
         self:query("workspaces", function(payload, err)
             if not payload then callback(nil, err); return end

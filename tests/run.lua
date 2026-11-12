@@ -237,7 +237,7 @@ test("capture aborts if native focus changes during async lookup", function()
 end)
 test("start, warm chooser, Escape, repeat start and stop free resources", function()
     local e, instance = app()
-    eq(e.hotkeys, 2); instance:start(); eq(e.hotkeys, 2)
+    eq(e.hotkeys, 1); instance:start(); eq(e.hotkeys, 1)
     instance:toggle(); e:flush(); eq(e.chooser.visible, true); eq(#e.chooser.items, 2)
     local builds = instance.icons.builds
     e.chooser:cancel(); eq(#e:moves(), 0)
@@ -248,7 +248,7 @@ end)
 test("new instance stops previous hotkey even after module reload", function()
     local e, first = app()
     local second = Project.new():start(); e:flush()
-    eq(first.running, false); eq(e.hotkeys, 2); second:stop(); eq(e.hotkeys, 0)
+    eq(first.running, false); eq(e.hotkeys, 1); second:stop(); eq(e.hotkeys, 0)
 end)
 test("rapid toggle cancels pending capture and ignores old callbacks", function()
     local e, instance = app()
@@ -325,27 +325,30 @@ end)
 test("panel shortcuts change modes and repeated switch shortcut closes the panel", function()
     local e, instance = app()
     instance:toggle(); e:flush()
-    instance.switchHotkey.callback(); e:flush()
+    instance:toggleSwitch(); e:flush()
     eq(e.chooser.visible, true); eq(instance.ui.mode, "switch")
-    instance.switchHotkey.callback(); e:flush()
+    instance:toggleSwitch(); e:flush()
     eq(e.chooser.visible, false); eq(#e:moves(), 0)
     instance:stop()
 end)
 
-local function picker(count, mode)
+local function picker(count, mode, overrides)
     local e = Mock.new()
     local selected
-    local ui = require("canvas_picker").new(e.hs, F.copy(require("config")),
+    local configuration = F.copy(require("config"))
+    for key, value in pairs(overrides or {}) do configuration[key] = value end
+    local ui = require("canvas_picker").new(e.hs, configuration,
         { text = function(_, key) return key end }, function(choice) selected = choice end)
     local items = {}
     for i = 1, count do
-        items[i] = { workspaceId = "ws" .. i, text = "Workspace " .. i, displayId = "display", displayName = "Display" }
+        items[i] = { workspaceId = "ws" .. i, text = "Workspace " .. i, displayId = "display", displayName = "Display", windows = {} }
     end
     ui:begin(mode or "switch"):choices(items):show()
-    local function key(code, flags, value, kind)
+    local function key(code, flags, value, kind, repeated)
         return ui.tap.callback({ getType = function() return kind or 10 end,
             getKeyCode = function() return code end, getFlags = function() return flags or {} end,
-            getUnicodeString = function() return value or "" end })
+            getUnicodeString = function() return value or "" end,
+            getProperty = function() return repeated and 1 or 0 end })
     end
     return e, ui, key, function() return selected end, items
 end
@@ -367,7 +370,7 @@ test("switch ignores modifiers, key-up and Command-number but passes opening hot
     for _, flag in ipairs({ "cmd", "ctrl", "alt", "shift", "fn" }) do key(0, { [flag] = true }, "a") end
     key(0, {}, "a", 11); key(18, { cmd = true }, "1")
     eq(selected(), nil); eq(ui:query(), "")
-    eq(key(13, { ctrl = true, alt = true, shift = true, cmd = true }), false)
+    eq(key(13, { ctrl = true, alt = true, shift = true }), false)
     key(0, {}, "a"); eq(selected().workspaceId, "ws1")
 end)
 test("26 workspaces use single letters and 27 use two letters", function()
@@ -398,27 +401,27 @@ end)
 test("refresh reserves removed letters and assigns new identities without remapping", function()
     local _, ui, key, _, items = picker(3)
     key(44); key(0, {}, "Workspace 3")
-    ui:choices({ items[3], items[1], { workspaceId = "new", text = "New", displayId = "display" } })
+    ui:choices({ items[3], items[1], { workspaceId = "new", text = "New", displayId = "display", windows = {} } })
     eq(ui.shortcuts.ws3, "d"); eq(ui.shortcuts.ws1, "a")
     eq(ui.shortcuts.ws2, "s"); eq(ui.shortcuts.new, "f")
     eq(ui:query(), "Workspace 3"); eq(ui.searching, true)
     ui:begin("switch"):choices({ items[3], items[1] })
     eq(ui.shortcuts.ws3, "a"); eq(ui.pendingPrefix, ""); eq(ui.searching, false)
 end)
-test("loading rows do not allocate shortcuts and later refresh preserves shortcut length", function()
+test("loading rows do not allocate shortcuts and later refresh increases shortcut length when needed", function()
     local _, ui, key, selected, items = picker(27)
     ui:begin("switch"):choices({ { text = "Loading", valid = false } })
     eq(ui.shortcutLength, nil); eq(ui.shortcutCount, 0)
     ui:choices({ items[1] }); eq(ui.shortcuts.ws1, "a")
-    ui:choices(items); eq(ui.shortcutLength, 1); eq(ui.shortcuts.ws27, nil)
+    ui:choices(items); eq(ui.shortcutLength, 2); eq(ui.shortcuts.ws27, "sa")
     key(125); eq(ui.visible, true); eq(selected(), nil)
     ui:selectedRow(27); key(36); eq(selected().workspaceId, "ws27")
 end)
-test("shortcuts select offscreen workspaces and two-letter capacity leaves extras accessible", function()
+test("shortcuts expand to three letters above 676 targets", function()
     local _, ui, key, selected = picker(677)
-    eq(ui.shortcutCount, 676); eq(ui.shortcuts.ws676, "mm"); eq(ui.shortcuts.ws677, nil)
-    ui:selectedRow(100); eq(ui.shortcuts.ws1, "aa")
-    key(46); key(46); eq(selected().workspaceId, "ws676")
+    eq(ui.shortcutCount, 677); eq(ui.shortcuts.ws676, "amm"); eq(ui.shortcuts.ws677, "saa")
+    ui:selectedRow(100); eq(ui.shortcuts.ws1, "aaa")
+    key(0); key(46); key(46); eq(selected().workspaceId, "ws676")
     local _, extra, press, choice = picker(677)
     press(44); press(0, {}, "Workspace 677"); press(36)
     eq(choice().workspaceId, "ws677")
@@ -439,7 +442,7 @@ test("switch keyboard selection dispatches a workspace switch and reopening rese
             getKeyCode = function() return code end, getFlags = function() return {} end,
             getUnicodeString = function() return "" end })
     end
-    press(1); e:flush()
+    press(2); e:flush()
     eq(e:moves()[1][2], "switch-workspace"); eq(e:moves()[1][3], "12")
     instance:toggleSwitch(); e:flush(); press(44)
     eq(ui.searching, true)
@@ -544,7 +547,7 @@ test("preview layout has 110px images and clips only the middle column", functio
     previewRows(ui, items, 2)
     e.snapshots[101] = { w = 2000, h = 500 }
     e:flushPreviews()
-    eq(ui.frame.w, 1440 * 0.9); eq(ui.frame.h, 820)
+    eq(ui.frame.w, 2 * 440 + 12 + 100 + 50); eq(ui.frame.h, 820)
     eq(ui.hitRows[1].bottom - ui.hitRows[1].top, 132)
     local clipCount, resets, images = 0, 0, 0
     for _, el in ipairs(ui.canvas.elements) do
@@ -560,7 +563,7 @@ test("preview layout has 110px images and clips only the middle column", functio
     local captures = #e.captures
     ui:selectedRow(8); e:flushPreviews()
     assert(#e.captures > captures)
-    ui:query("Workspace 1"); e:flushPreviews(); eq(ui.shortcuts.ws1, "a")
+    ui:query("Workspace 1"); e:flushPreviews(); assert(ui.shortcuts["window:1:1:101"])
     ui:cancel(); assert(next(ui.previews.images)); eq(#ui.canvas.elements, 0)
 end)
 test("horizontal preview scrolling is per workspace and clamps without changing selection", function()
@@ -578,7 +581,7 @@ test("horizontal preview scrolling is per workspace and clamps without changing 
 end)
 test("clicking a preview selects its workspace and empty workspaces show a message", function()
     local _, ui, _, selected, items = picker(2)
-    previewRows(ui, items, 0); eq(hasText(ui, "emptyWorkspace"), true)
+    previewRows(ui, items, 0); eq(hasText(ui, "A"), true)
     local hit = ui.hitRows[2]
     ui.tap.callback({ getType = function() return 1 end,
         location = function() return { x = ui.frame.x + ui.previewColumn.x + 10, y = ui.frame.y + hit.top + 30 } end })
@@ -705,6 +708,310 @@ test("preview refresh interval rejects invalid values and zero disables scheduli
     local e, instance = app({ previewRefreshInterval = 0 })
     eq(instance.ui.backgroundTimer, nil); e:flushPreviews(); eq(#e.captures, 0)
     instance:stop()
+end)
+
+local function windowKey(window)
+    return "window:" .. window.id .. ":" .. window.windowId
+end
+local function typeSequence(key, sequence)
+    local codes = { a = 0, s = 1, d = 2, f = 3, g = 5, h = 4, j = 38, k = 40, l = 37,
+        q = 12, w = 13, e = 14, r = 15, t = 17, y = 16, u = 32, i = 34, o = 31, p = 35,
+        z = 6, x = 7, c = 8, v = 9, b = 11, n = 45, m = 46 }
+    for letter in sequence:gmatch(".") do key(codes[letter]) end
+end
+test("every window gets a distinct shortcut and selection returns both window identities", function()
+    local _, ui, key, selected, items = picker(2)
+    previewRows(ui, items, 2)
+    local first, second = items[1].windows[1], items[1].windows[2]
+    assert(ui.shortcuts[windowKey(first)] ~= ui.shortcuts[windowKey(second)])
+    typeSequence(key, ui.shortcuts[windowKey(second)])
+    eq(selected().window.id, second.id); eq(selected().window.windowId, second.windowId)
+end)
+test("window activation validates native identity and never switches or moves workspaces", function()
+    local e, api = cli(); local ok, err
+    api:focusWindow({ id = "ow_second", windowId = 102 }, function(value, why) ok, err = value, why end)
+    e:flush(); eq(ok, true); eq(err, nil); eq(e.calls[2][1], "window"); eq(e.calls[2][2], "focus")
+    eq(e.calls[2][3], "ow_second"); eq(#e:moves(), 0)
+    e.calls = {}
+    api:focusWindow({ id = "ow_second", windowId = 999 }, function(value, why) ok, err = value, why end)
+    e:flush(); eq(ok, nil); assert(err:find("identity changed")); eq(#e.calls, 1)
+    api:focusWindow({ id = "closed", windowId = 102 }, function(value, why) ok, err = value, why end)
+    e:flush(); eq(ok, nil); assert(err:find("closed")); eq(#e.calls, 2)
+end)
+test("switch panel letters focus a specific window through the CLI", function()
+    local e, instance = app()
+    instance:toggleSwitch(); e:flush()
+    local ui = instance.ui.chooser
+    local label = ui.shortcuts["window:ow_second:102"]
+    for letter in label:gmatch(".") do ui:letter(letter) end
+    e:flush()
+    eq(#e:moves(), 0)
+    local focused
+    for _, args in ipairs(e.calls) do if args[1] == "window" then focused = args end end
+    eq(focused[2], "focus"); eq(focused[3], "ow_second")
+    instance:stop()
+end)
+test("partial input hides typed characters and unrelated badges until timeout", function()
+    local _, ui, key = picker(27)
+    key(0); eq(ui.pendingPrefix, "a")
+    local matching, unrelated = {}, {}
+    ui:badge(matching, "ws2", 100, 100); ui:badge(unrelated, "ws27", 100, 100)
+    eq(matching[2].text, "S"); eq(#unrelated, 0)
+    eq(ui.sequenceTimer.delay, 0.3)
+    ui.sequenceTimer.callback()
+    eq(ui.pendingPrefix, ""); eq(ui.sequenceTimer, nil)
+    local restored = {}; ui:badge(restored, "ws2", 100, 100); eq(restored[2].text, "AS")
+end)
+test("three-letter shortcuts restart the configurable timer after each correct letter", function()
+    local e, ui, key, selected = picker(677, "switch", { shortcutSequenceTimeoutMs = 500 })
+    key(0); local first = ui.sequenceTimer
+    eq(first.delay, 0.5)
+    e.now = e.now + 400000000
+    key(0); local second = ui.sequenceTimer
+    eq(ui.pendingPrefix, "aa"); eq(first.active, false); eq(second.delay, 0.5)
+    first.callback(); eq(ui.pendingPrefix, "aa")
+    e.now = e.now + 400000000
+    key(1); eq(selected().workspaceId, "ws2"); eq(second.active, false)
+end)
+test("a letter after the deadline starts a fresh sequence even before the timer callback", function()
+    local e, ui, key, selected = picker(27)
+    key(0); local late = ui.sequenceTimer
+    e.now = e.now + 301000000
+    key(1); eq(selected(), nil); eq(ui.pendingPrefix, "s")
+    late.callback(); eq(ui.pendingPrefix, "s")
+    key(0); eq(selected().workspaceId, "ws27")
+end)
+test("repeated key-down events cannot finish a shortcut", function()
+    local _, ui, key, selected = picker(27)
+    key(0); local timer = ui.sequenceTimer
+    key(0, {}, "a", 10, true)
+    eq(ui.pendingPrefix, "a"); eq(selected(), nil); eq(ui.sequenceTimer, timer)
+    key(0); eq(selected().workspaceId, "ws1")
+end)
+test("navigation search and closing reset prefixes and cancel pending timers", function()
+    for _, code in ipairs({ 123, 124, 125, 126, 44, 53 }) do
+        local _, ui, key = picker(27)
+        key(0); local timer = ui.sequenceTimer
+        key(code); eq(ui.pendingPrefix, ""); eq(timer.active, false)
+        timer.callback(); eq(ui.pendingPrefix, "")
+    end
+    local _, ui, key = picker(27)
+    key(0); local timer = ui.sequenceTimer
+    ui:cancel(); eq(timer.active, false); timer.callback(); eq(ui.visible, false)
+    ui:begin("move"); eq(ui.pendingPrefix, "")
+end)
+test("window arrows clamp and reveal the selected preview while rows wrap", function()
+    local _, ui, key, selected, items = picker(3)
+    previewRows(ui, items, 5)
+    items[2].windows = { items[2].windows[1] }; items[3].windows = {}; ui:choices(items)
+    key(123); eq(ui.windowIndex, 1)
+    for _ = 1, 6 do key(124) end
+    eq(ui.windowIndex, 5); assert(ui.previews.offsets.ws1 > 0)
+    key(125); eq(ui.row, 2); eq(ui.windowIndex, 1)
+    key(125); eq(ui.row, 3); eq(ui.windowIndex, 1)
+    key(125); eq(ui.row, 1); key(124); key(36)
+    eq(selected().window.id, items[1].windows[2].id)
+end)
+test("preview clicks activate that window but workspace label clicks only highlight", function()
+    local _, ui, _, selected, items = picker(2)
+    previewRows(ui, items, 2)
+    local function click(x, y)
+        ui.tap.callback({ getType = function() return 1 end,
+            location = function() return { x = ui.frame.x + x, y = ui.frame.y + y } end })
+    end
+    local hit = ui.hitRows[2]
+    click(ui.frame.w - 30, hit.top + 25); eq(ui.row, 2); eq(selected(), nil)
+    local preview = ui.hitRows[2].previews[2]
+    click(preview.left + 10, hit.top + 25)
+    eq(selected().window.id, items[2].windows[2].id)
+end)
+test("badges center on previews and empty placeholders with unchanged style", function()
+    local _, ui, _, _, items = picker(2)
+    items[1].windows = { { id = "one", windowId = 1, frame = { w = 500, h = 500 } } }
+    ui:choices(items)
+    local label = ui.shortcuts[windowKey(items[1].windows[1])]:upper()
+    local hit = ui.hitRows[1]; local preview = hit.previews[1]
+    local found = false
+    for i, element in ipairs(ui.canvas.elements) do
+        if element.text == label then
+            found = true
+            eq(element.frame.x + element.frame.w / 2, (preview.left + preview.right) / 2)
+            eq(element.frame.y + element.frame.h / 2, hit.top + 12 + 110 / 2)
+            local square = ui.canvas.elements[i - 1]
+            eq(square.fillColor.alpha, 0.4); eq(square.roundedRectRadii.xRadius, 8)
+        end
+    end
+    eq(found, true); eq(ui.previewColumn.x, 20)
+end)
+test("capacity growth rebuilds uniform shortcuts and resets pending input", function()
+    local _, ui, key, _, items = picker(676)
+    key(0); local timer = ui.sequenceTimer
+    items[677] = { workspaceId = "added", text = "New", displayId = "display", windows = {} }
+    ui:choices(items)
+    eq(ui.shortcutLength, 3); eq(ui.shortcuts.ws1, "aaa"); eq(ui.shortcuts.added, "saa")
+    eq(ui.pendingPrefix, ""); eq(timer.active, false)
+end)
+test("window shortcuts and selection survive reordering without swapping window identity", function()
+    local _, ui, key, _, items = picker(1)
+    previewRows(ui, items, 3)
+    key(124); local second = items[1].windows[2]
+    local label = ui.shortcuts[windowKey(second)]
+    local refreshed = F.copy(items)
+    refreshed[1].windows = { second, items[1].windows[1], items[1].windows[3] }
+    ui:choices(refreshed)
+    eq(ui.windowIndex, 1); eq(ui.shortcuts[windowKey(second)], label)
+end)
+test("shortcut sequence timeout accepts only positive integer milliseconds", function()
+    for _, value in ipairs({ 0, -1, 1.5, math.huge, "300" }) do
+        rejects(function() Project.new({ shortcutSequenceTimeoutMs = value }) end, "Invalid shortcutSequenceTimeoutMs")
+    end
+    eq(Project.new({ shortcutSequenceTimeoutMs = 450 }).config.shortcutSequenceTimeoutMs, 450)
+end)
+
+test("switch width fits preview rows and labels and caps at 80 percent", function()
+    local e, ui, _, _, items = picker(2)
+    items[1].windows = { { id = "wide", windowId = 1, frame = { w = 1000, h = 500 } } }
+    items[2].windows = { { id = "portrait", windowId = 2, frame = { w = 500, h = 1000 } } }
+    ui:choices(items)
+    eq(ui.frame.w, 220 + 100 + 50)
+    eq(ui.frame.x, (1440 - ui.frame.w) / 2)
+    eq(ui.previewColumn.w, 220)
+    items[1].windows[2] = { id = "huge", windowId = 3, frame = { w = 10000, h = 500 } }
+    ui:choices(items)
+    eq(ui.frame.w, 1440 * 0.8)
+    assert(ui.hitRows[1].maxPreviewOffset > 0)
+    ui:query("Workspace 2"); eq(ui.frame.w, 1440 * 0.8)
+    ui:query("")
+    items[1].windows = {}; ui:choices(items)
+    eq(ui.frame.w, 55 + 100 + 50)
+    e.snapshots[2] = { w = 1000, h = 500 }
+    e:flushPreviews()
+    eq(ui.frame.w, 220 + 100 + 50)
+    eq(ui.frame.x, (1440 - ui.frame.w) / 2)
+end)
+
+local function gesture(configuration)
+    local e, count = Mock.new(), 0
+    local controller = require("double_press").new(e.hs,
+        configuration or { modifiers = { "ctrl", "alt", "shift" }, intervalMs = 200 },
+        function() count = count + 1 end):start()
+    local function event(flags, kind, code)
+        return controller.tap.callback({ getType = function() return kind or 12 end,
+            getFlags = function() return flags or {} end, getKeyCode = function() return code or 54 end })
+    end
+    local function tap()
+        event({ ctrl = true }); event({ ctrl = true, alt = true })
+        event({ ctrl = true, alt = true, shift = true })
+        event({ ctrl = true, alt = true }); event({ ctrl = true }); event({})
+    end
+    return e, controller, event, tap, function() return count end
+end
+test("two complete Hyper taps toggle once without consuming events", function()
+    local _, controller, event, tap, count = gesture()
+    tap(); eq(count(), 0)
+    tap(); eq(count(), 1); eq(controller.lastTap, nil)
+    eq(event({}), false)
+    tap(); eq(count(), 1)
+    controller:stop(); eq(controller.tap.enabled, false)
+end)
+test("ordinary typing before Hyper does not invalidate its first tap", function()
+    local _, _, event, tap, count = gesture()
+    event({}, 10); tap(); tap(); eq(count(), 1)
+end)
+test("slow taps long holds and timer expiry do not trigger", function()
+    local e, controller, event, tap, count = gesture()
+    tap(); e.now = e.now + 201000000; tap(); eq(count(), 0)
+    controller.timer.callback(); tap(); eq(count(), 0)
+    event({ ctrl = true, alt = true, shift = true })
+    e.now = e.now + 201000000; event({}); eq(count(), 0)
+end)
+test("keys mouse input and extra modifiers cancel a pending double press", function()
+    for _, kind in ipairs({ 10, 1, 3, 25, 22 }) do
+        local _, _, event, tap, count = gesture()
+        tap(); event({}, kind); tap(); eq(count(), 0)
+        tap(); eq(count(), 1)
+    end
+    local _, _, event, tap, count = gesture()
+    tap(); event({ ctrl = true, alt = true, shift = true, cmd = true }); event({})
+    tap(); eq(count(), 0); tap(); eq(count(), 1)
+end)
+test("Hyper plus W remains a shortcut rather than a tap", function()
+    local _, _, event, tap, count = gesture()
+    local hyper = { ctrl = true, alt = true, shift = true }
+    event(hyper); event(hyper, 10); event({})
+    tap(); eq(count(), 0); tap(); eq(count(), 1)
+end)
+test("double-press timeout is configurable and stop ignores expired timers", function()
+    local e, controller, _, tap, count = gesture({ modifiers = { "ctrl", "alt", "shift" }, intervalMs = 350 })
+    tap(); eq(controller.timer.delay, 0.35)
+    e.now = e.now + 220000000; tap(); eq(count(), 1)
+    tap(); local timer = controller.timer
+    controller:stop(); eq(timer.active, false); timer.callback(); eq(count(), 1)
+end)
+test("application binds only Hyper-W by default and double press toggles the switcher", function()
+    local e, instance = app()
+    eq(e.hotkeys, 1); eq(instance.switchHotkey, nil)
+    local controller = instance.doublePress
+    local function tap()
+        controller.tap.callback({ getType = function() return 12 end,
+            getFlags = function() return { cmd = true } end, getKeyCode = function() return 54 end })
+        controller.tap.callback({ getType = function() return 12 end, getFlags = function() return {} end,
+            getKeyCode = function() return 54 end })
+    end
+    tap(); tap(); e:flush(); eq(instance.ui.chooser.visible, true)
+    tap(); tap(); e:flush(); eq(instance.ui.chooser.visible, false)
+    instance:stop(); eq(controller.tap.enabled, false)
+end)
+test("panel input cancels a pending tap even if the picker consumes its event", function()
+    local e, instance = app()
+    instance:toggleSwitch(); e:flush()
+    instance.doublePress.lastTap = e.hs.timer.absoluteTime() / 1e6
+    instance.ui.chooser.tap.callback({ getType = function() return 10 end,
+        getFlags = function() return {} end, getKeyCode = function() return 44 end,
+        getProperty = function() return 0 end })
+    eq(instance.doublePress.lastTap, nil)
+    instance:stop()
+end)
+test("legacy switch hotkey is available when double press is disabled", function()
+    local e, instance = app({ switchDoublePress = { enabled = false, modifiers = { "ctrl" }, intervalMs = 200 } })
+    eq(e.hotkeys, 2); eq(instance.doublePress, nil)
+    instance.switchHotkey.callback(); e:flush(); eq(instance.ui.chooser.visible, true)
+    instance:stop()
+end)
+test("double-press configuration rejects invalid modifiers and timing", function()
+    for _, configuration in ipairs({
+        { enabled = true, modifiers = {}, intervalMs = 200 },
+        { enabled = true, modifiers = { "bad" }, intervalMs = 200 },
+        { enabled = true, modifiers = { "ctrl", "ctrl" }, intervalMs = 200 },
+        { enabled = true, modifiers = { "ctrl" }, intervalMs = 0 },
+        { enabled = true, modifiers = { "ctrl" }, intervalMs = 2.5 },
+        { enabled = true, modifiers = { "ctrl" }, intervalMs = math.huge },
+    }) do rejects(function() Project.new({ switchDoublePress = configuration }) end, "Invalid switchDoublePress") end
+end)
+
+test("physical Right Command double press ignores Left Command and mixed sides", function()
+    local _, _, event, _, count = gesture({ modifiers = { "cmd" }, keyCode = 54, intervalMs = 200 })
+    local function tap(code)
+        eq(event({ cmd = true }, 12, code), false); eq(event({}, 12, code), false)
+    end
+    tap(55); tap(55); eq(count(), 0)
+    tap(54); tap(55); tap(54); eq(count(), 0)
+    tap(54); eq(count(), 1)
+    event({ cmd = true }, 12, 55)
+    event({ cmd = true }, 12, 54)
+    event({ cmd = true }, 12, 54)
+    event({}, 12, 55)
+    tap(54); eq(count(), 1); tap(54); eq(count(), 2)
+end)
+test("Right Command shortcuts and extra modifiers cannot count as taps", function()
+    local _, _, event, _, count = gesture({ modifiers = { "cmd" }, keyCode = 54, intervalMs = 200 })
+    local function tap()
+        event({ cmd = true }, 12, 54); event({}, 12, 54)
+    end
+    event({ cmd = true }, 12, 54); event({ cmd = true }, 10, 0); event({}, 12, 54)
+    tap(); eq(count(), 0)
+    event({ cmd = true, shift = true }, 12, 54); event({}, 12, 54)
+    tap(); eq(count(), 0); tap(); eq(count(), 1)
 end)
 
 print(string.format("\n%d passed, %d failed", passed, failed))

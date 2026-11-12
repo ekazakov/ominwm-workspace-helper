@@ -3,6 +3,7 @@ local defaults = require(prefix .. "config")
 local OmniWM = require(prefix .. "omniwm")
 local Icons = require(prefix .. "icons")
 local Chooser = require(prefix .. "workspace_chooser")
+local DoublePress = require(prefix .. "double_press")
 local M = {}
 local registryKey = "__omniwm_workspace_chooser_instance"
 
@@ -22,6 +23,8 @@ function M.new(overrides)
     for _, key in ipairs({ "maxIcons", "iconSize", "iconCacheLimit", "compositeCacheLimit", "rows" }) do
         assert(type(config[key]) == "number" and config[key] >= 1 and config[key] % 1 == 0, "Invalid " .. key)
     end
+    assert(type(config.shortcutSequenceTimeoutMs) == "number" and config.shortcutSequenceTimeoutMs > 0
+        and config.shortcutSequenceTimeoutMs % 1 == 0, "Invalid shortcutSequenceTimeoutMs")
     assert(type(config.previewRefreshInterval) == "number" and config.previewRefreshInterval >= 0
         and config.previewRefreshInterval < math.huge, "Invalid previewRefreshInterval")
     assert(type(config.width) == "number" and config.width > 0 and config.width <= 100, "Invalid width")
@@ -32,6 +35,19 @@ function M.new(overrides)
         and type(config.hotkey.key) == "string", "Invalid hotkey")
     assert(type(config.switchHotkey) == "table" and type(config.switchHotkey.modifiers) == "table"
         and type(config.switchHotkey.key) == "string", "Invalid switchHotkey")
+    local gesture = config.switchDoublePress
+    assert(type(gesture) == "table" and type(gesture.enabled) == "boolean"
+        and type(gesture.modifiers) == "table" and #gesture.modifiers > 0
+        and type(gesture.intervalMs) == "number" and gesture.intervalMs > 0
+        and gesture.intervalMs % 1 == 0, "Invalid switchDoublePress")
+    assert(gesture.keyCode == nil or (type(gesture.keyCode) == "number" and gesture.keyCode >= 0
+        and gesture.keyCode <= 255 and gesture.keyCode % 1 == 0), "Invalid switchDoublePress keyCode")
+    local seen = {}
+    for _, modifier in ipairs(gesture.modifiers) do
+        assert(({ ctrl = true, alt = true, shift = true, cmd = true, fn = true })[modifier]
+            and not seen[modifier], "Invalid switchDoublePress modifier")
+        seen[modifier] = true
+    end
     assert(config.cliPath == nil or type(config.cliPath) == "string", "Invalid cliPath")
     for _, key in ipairs({ "showEmptyWorkspaces", "showCurrentWorkspace", "searchAppNames", "refreshOnOpen", "debug" }) do
         assert(type(config[key]) == "boolean", "Invalid " .. key)
@@ -49,7 +65,17 @@ function M.new(overrides)
         self.running = true
         rawset(_G, registryKey, self)
         self.hotkey = hs.hotkey.bind(config.hotkey.modifiers, config.hotkey.key, function() self.ui:toggle() end)
-        self.switchHotkey = hs.hotkey.bind(config.switchHotkey.modifiers, config.switchHotkey.key, function() self.ui:toggle("switch") end)
+        if config.switchDoublePress.enabled then
+            self.doublePress = DoublePress.new(hs, config.switchDoublePress, function()
+                if self.running then self.ui:toggle("switch") end
+            end):start()
+            self.ui.chooser.onInput = function(event)
+                if self.doublePress then self.doublePress:interrupt(event:getFlags()) end
+            end
+            if not self.doublePress.tap:isEnabled() then self.log.w("Cannot observe modifier double press") end
+        else
+            self.switchHotkey = hs.hotkey.bind(config.switchHotkey.modifiers, config.switchHotkey.key, function() self.ui:toggle("switch") end)
+        end
         self.cli:check(function(ok, err)
             if not self.running then return end
             if ok then self.ui:startBackgroundPreviews() else self.log.w("Startup compatibility check failed: " .. tostring(err)) end
@@ -64,6 +90,7 @@ function M.new(overrides)
         self.running = false
         if self.hotkey then self.hotkey:delete(); self.hotkey = nil end
         if self.switchHotkey then self.switchHotkey:delete(); self.switchHotkey = nil end
+        if self.doublePress then self.doublePress:stop(); self.doublePress = nil end
         self.ui:stop()
         self.cli:stop()
         self.icons:stop()

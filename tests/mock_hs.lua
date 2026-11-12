@@ -52,10 +52,10 @@ function M.new()
     end }
     hs.alert = { show = function(msg) e.alerts[#e.alerts + 1] = msg end }
     hs.keycodes = { map = { w = 13, a = 0, v = 9, escape = 53, ["return"] = 36, padenter = 76,
-        up = 126, down = 125, delete = 51, forwarddelete = 117 } }
+        up = 126, down = 125, left = 123, right = 124, delete = 51, forwarddelete = 117 } }
     hs.eventtap = {
-        event = { types = { keyDown = 10, keyUp = 11, mouseMoved = 5,
-            leftMouseDown = 1, rightMouseDown = 3, scrollWheel = 22 }, properties = { scrollWheelEventDeltaAxis1 = 1, scrollWheelEventDeltaAxis2 = 2 } },
+        event = { types = { keyDown = 10, keyUp = 11, flagsChanged = 12, otherMouseDown = 25, mouseMoved = 5,
+            leftMouseDown = 1, rightMouseDown = 3, scrollWheel = 22 }, properties = { scrollWheelEventDeltaAxis1 = 1, scrollWheelEventDeltaAxis2 = 2, keyboardEventAutorepeat = 3 } },
         isSecureInputEnabled = function() return false end,
         new = function(_, callback)
             return { callback = callback, start = function(self) self.enabled = true end,

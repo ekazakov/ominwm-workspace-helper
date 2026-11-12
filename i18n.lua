@@ -2,11 +2,12 @@
 local M = {}
 local strings = {
     en = {
+        targetClosed = "The selected window closed.", targetChanged = "The selected window changed identity. Selection canceled.",
         emptyWorkspace = "Empty workspace", loadingPreviews = "Loading previews…",
-        switchLetters = "Letter to switch · / to search",
+        switchLetters = "Letters select a window · / to search",
         switchSearch = "Search · Esc to return:",
         switchPrefix = "Next letter:",
-        switchPlaceholder = "Switch to workspace…",
+        switchPlaceholder = "Switch to window…",
         keyboardUnavailable = "Cannot capture keyboard input. Check Hammerspoon permissions and close password fields (Secure Input).",
         placeholder = "Move column → workspace…", loading = "Loading workspaces…",
         empty = "No apps", unknownApp = "Unknown app", noDestinations = "No available destinations",
@@ -25,11 +26,12 @@ local strings = {
         invalidData = "OmniWM returned unexpected data. See Hammerspoon Console for details.",
     },
     de = {
+        targetClosed = "Das ausgewählte Fenster wurde geschlossen.", targetChanged = "Das ausgewählte Fenster hat seine Identität geändert. Auswahl abgebrochen.",
         emptyWorkspace = "Leerer Arbeitsbereich", loadingPreviews = "Vorschaubilder werden geladen…",
-        switchLetters = "Buchstabe zum Wechseln · / zur Suche",
+        switchLetters = "Buchstaben wählen Fenster · / zur Suche",
         switchSearch = "Suche · Esc zurück:",
         switchPrefix = "Nächster Buchstabe:",
-        switchPlaceholder = "Arbeitsbereich wechseln…",
+        switchPlaceholder = "Fenster wechseln…",
         keyboardUnavailable = "Tastatureingabe nicht verfügbar. Hammerspoon-Berechtigungen prüfen und Passwortfelder schließen (Secure Input).",
         placeholder = "Spalte verschieben → Arbeitsbereich…", loading = "Arbeitsbereiche werden geladen…",
         empty = "Keine Apps", unknownApp = "Unbekannte App", noDestinations = "Keine verfügbaren Ziele",
@@ -48,11 +50,12 @@ local strings = {
         invalidData = "OmniWM hat unerwartete Daten zurückgegeben. Details stehen in der Hammerspoon-Konsole.",
     },
     ru = {
+        targetClosed = "Выбранное окно закрыто.", targetChanged = "Идентификатор выбранного окна изменился. Выбор отменён.",
         emptyWorkspace = "Пустой воркспейс", loadingPreviews = "Загрузка снимков…",
-        switchLetters = "Буква — перейти · / — поиск",
+        switchLetters = "Буквы — выбор окна · / — поиск",
         switchSearch = "Поиск · Esc — назад:",
         switchPrefix = "Следующая буква:",
-        switchPlaceholder = "Перейти на воркспейс…",
+        switchPlaceholder = "Перейти к окну…",
         keyboardUnavailable = "Не удалось перехватить клавиатуру. Проверьте разрешения Hammerspoon и закройте поля паролей (Secure Input).",
         placeholder = "Перенести колонку → воркспейс…", loading = "Загрузка воркспейсов…",
         empty = "Нет приложений", unknownApp = "Неизвестное приложение", noDestinations = "Нет доступных назначений",
@@ -75,6 +78,7 @@ local strings = {
 -- Error text remains stable in the CLI/normalization layers for diagnostics.
 -- Translate it at the UI boundary, including errors prefixed with a Lua source location.
 local errors = {
+    { "Target window has closed", "targetClosed" }, { "Target window identity changed", "targetChanged" },
     { "No native window focused", "noFocus" }, { "no managed window focused", "noFocus" },
     { "Focus changed", "focusChanged" }, { "Source window has closed", "closed" },
     { "Source window changed workspace", "moved" }, { "not in a Niri column", "notColumn" },

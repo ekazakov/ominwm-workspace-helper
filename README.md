@@ -1,15 +1,21 @@
 # OmniWM Workspace Column Mover
 
 
-The workspace switch panel uses the same layout and controls as the column move panel. Press Hyper+Command+W (Ctrl+Alt+Shift+Command+W), then select a workspace. The panel switches to that workspace without moving windows. Hyper+W (Ctrl+Alt+Shift+W) opens the column move panel. Set `switchHotkey` to change the switch shortcut. Call `omniwmWorkspaceChooser:toggleSwitch()` to open or close the switch panel from Lua.
+Press and release Right Command twice within 200 ms to open or close the window switcher. Each window has a letter shortcut centered on its preview. Empty workspaces have shortcuts that switch to those workspaces. Hyper+W (Ctrl+Alt+Shift+W) opens the column move panel.
 
-In the switch panel, press a workspace letter to switch immediately. Letters follow `asdfghjklqwertyuiopzxcvbnm` across display groups. Above 26 workspaces, use the two-letter labels. Shortcuts use physical key positions across keyboard layouts. Assignments stay fixed until the panel closes, including during search and refresh.
+Shortcuts follow `asdfghjklqwertyuiopzxcvbnm` across display groups, workspace rows, and windows. Up to 26 targets use one letter. Up to 676 targets use two letters. Larger lists use longer sequences. Shortcuts use physical key positions across keyboard layouts.
 
-Press `/` to search, then press Enter to select a result. In search mode, press Escape to clear search and return to letter mode. For two-letter shortcuts, Escape clears the pending first letter. In letter mode without pending input, Escape closes the panel. The move panel retains Command+number shortcuts and direct text search.
+Press sequence letters one after another. After each correct letter, matching badges show only the remaining letters. Other badges disappear. The default timeout between letters is 300 ms. Set `shortcutSequenceTimeoutMs` to a positive integer to change this timeout in milliseconds. A timeout or wrong letter restores all badges. Holding a key does not complete a sequence.
 
-New workspaces receive unused labels during refresh. Removed workspaces reserve their labels until the panel closes. If all labels are assigned, use search, arrows, or clicks to select additional workspaces. The initial list determines whether that opening uses one-letter or two-letter labels.
+Left/right selects a window within a workspace row. Up/down changes workspace rows. Enter focuses the selected window or switches to an empty workspace. Click a preview to focus that window. Clicking workspace label text only highlights the row. The panel scrolls the selected preview into view.
 
-The switch panel shows one screenshot per window, including separate windows from the same app. Each preview is 110 px high and keeps its proportions. Empty workspace rows use one-third of the regular row height. The workspace label column fits the longest label, with a 10 px gap after the previews. The panel uses 90% of the screen width. Scroll horizontally over previews, or use Shift+wheel, to see more windows in a workspace. Click a preview to select its workspace.
+Press `/` to search, then press Enter to select a result. Escape resets a partial sequence first. In search mode, Escape clears search and returns to letter mode. Without partial input or search, Escape closes the panel. Navigation and entering search also reset partial input. The move panel retains Command+number shortcuts and direct text search.
+
+Assignments stay fixed during search and refresh. New targets receive unused shortcuts. Removed targets reserve their shortcuts until closing. If capacity runs out, the panel increases the shortcut length, reassigns all targets, and resets partial input.
+
+The switcher shows separate previews for windows from the same app. Each preview is 110 px high and keeps its proportions. Empty rows use one-third of the regular row height. The workspace label column fits the longest label. A 10 px gap separates previews and labels. The panel fits the longest preview row and workspace labels, including gaps and padding. Its maximum width is 80% of the screen. Scroll horizontally over previews, or use Shift+wheel, to see more windows.
+
+Set `switchDoublePress.intervalMs` to change the tap interval. Each tap must also finish within that interval. Left Command does not trigger the switcher. The default `keyCode = 54` identifies the physical Right Command key. A key press, click, scroll, or extra modifier cancels the gesture. The helper observes modifier changes without consuming events. Set `switchDoublePress.enabled = false` to use `switchHotkey` instead. The existing `omniwmWorkspaceChooser:toggleSwitch()` method opens or closes the window switcher.
 
 Window screenshots stay in memory across panel openings. The helper refreshes windows across all workspaces every 30 seconds, even while the panel is closed. Visible windows receive priority. Each capture runs in a separate timer callback. If capture fails, the helper keeps the previous screenshot or uses an app icon. Closed windows leave the cache after a successful workspace refresh. Stopping the helper releases all screenshots. The helper never saves screenshots to disk. Set `previewRefreshInterval = 0` to disable background refresh. The move panel keeps its compact app icons.
 

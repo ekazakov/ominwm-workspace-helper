@@ -120,7 +120,8 @@ function M.new(hs, config, cli, icons, logger)
             if not ok then notify(err); return end
             self:refresh()
         end
-        if switching then cli:switch(choice.workspaceId, completed)
+        if switching and choice.window then cli:focusWindow(choice.window, completed)
+        elseif switching then cli:switch(choice.workspaceId, completed)
         else cli:move(source, choice.workspaceId, completed) end
     end, function(bundle) return icons:app(bundle) end)
 
