@@ -1,5 +1,20 @@
 # OmniWM Workspace Column Mover
 
+
+The workspace switch panel uses the same layout and controls as the column move panel. Press Hyper+Command+W (Ctrl+Alt+Shift+Command+W), then select a workspace. The panel switches to that workspace without moving windows. Hyper+W (Ctrl+Alt+Shift+W) opens the column move panel. Set `switchHotkey` to change the switch shortcut. Call `omniwmWorkspaceChooser:toggleSwitch()` to open or close the switch panel from Lua.
+
+In the switch panel, press a workspace letter to switch immediately. Letters follow `asdfghjklqwertyuiopzxcvbnm` across display groups. Above 26 workspaces, use the two-letter labels. Shortcuts use physical key positions across keyboard layouts. Assignments stay fixed until the panel closes, including during search and refresh.
+
+Press `/` to search, then press Enter to select a result. In search mode, press Escape to clear search and return to letter mode. For two-letter shortcuts, Escape clears the pending first letter. In letter mode without pending input, Escape closes the panel. The move panel retains Command+number shortcuts and direct text search.
+
+New workspaces receive unused labels during refresh. Removed workspaces reserve their labels until the panel closes. If all labels are assigned, use search, arrows, or clicks to select additional workspaces. The initial list determines whether that opening uses one-letter or two-letter labels.
+
+The switch panel shows one screenshot per window, including separate windows from the same app. Each preview is 110 px high and keeps its proportions. Empty workspace rows use one-third of the regular row height. The workspace label column fits the longest label, with a 10 px gap after the previews. The panel uses 90% of the screen width. Scroll horizontally over previews, or use Shift+wheel, to see more windows in a workspace. Click a preview to select its workspace.
+
+Window screenshots stay in memory across panel openings. The helper refreshes windows across all workspaces every 30 seconds, even while the panel is closed. Visible windows receive priority. Each capture runs in a separate timer callback. If capture fails, the helper keeps the previous screenshot or uses an app icon. Closed windows leave the cache after a successful workspace refresh. Stopping the helper releases all screenshots. The helper never saves screenshots to disk. Set `previewRefreshInterval = 0` to disable background refresh. The move panel keeps its compact app icons.
+
+
+
 Расширение Hammerspoon: **Hyper + W** открывает список воркспейсов с иконками приложений, Enter переносит исходную Niri-колонку целиком. Escape или повторный шорткат отменяет выбор. Поиск работает по номеру, имени и приложениям.
 
 Меню использует `hs.canvas`. Слева расположен номер и название workspace, справа — иконки приложений одного размера `iconSize`, затем подсказки ⌘1–⌘9 шрифтом 15 pt. Названия приложений скрыты. Воркспейсы сгруппированы по ID дисплея, а имя дисплея показано общим подзаголовком группы. Поиск сохраняет группировку; заголовки не выбираются стрелками или кликом и не занимают позиции ⌘1–⌘9. Управление: стрелки, Enter, Escape, ⌘1–⌘9, клик по строке, прокрутка, Backspace, ⌘V для вставки, ⌘A для очистки запроса. Клик вне меню закрывает его.
@@ -69,6 +84,7 @@ omniwmWorkspaceChooser = require("omniwm-workspace-chooser").new({
 | `refreshOnOpen`        | `true`       | Обновлять данные после открытия из кеша                     |
 | `debug`                | `false`      | Выводить измерения в Hammerspoon Console                    |
 | `cliPath`              | `nil`        | Полный путь; иначе поиск в стандартных каталогах и `PATH`   |
+| `previewRefreshInterval` | `30` | Seconds between background preview refreshes. Use `0` to disable. |
 | `taskTimeout`          | `5`          | Таймаут одного CLI-запроса, секунды                         |
 | `iconCacheLimit`       | `128`        | Максимум записей кеша приложений                            |
 | `compositeCacheLimit`  | `128`        | Максимум записей кеша составных изображений                 |

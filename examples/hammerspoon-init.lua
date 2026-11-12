@@ -2,6 +2,7 @@
 if omniwmWorkspaceChooser then omniwmWorkspaceChooser:stop() end
 omniwmWorkspaceChooser = require("omniwm-workspace-chooser").new({
     hotkey = { modifiers = { "ctrl", "alt", "shift" }, key = "W" },
+    switchHotkey = { modifiers = { "ctrl", "alt", "shift", "cmd" }, key = "W" },
     maxIcons = 5,
     iconSize = 22,
     -- cliPath = "/opt/homebrew/bin/omniwmctl",

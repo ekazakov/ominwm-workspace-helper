@@ -84,7 +84,17 @@ function M.mergeWindows(workspaces, payload)
             byId[id][#byId[id] + 1] = row
         end
     end
-    for _, ws in ipairs(workspaces) do ws.apps = applications(byId[ws.id] or {}) end
+    for _, ws in ipairs(workspaces) do
+        local rows = byId[ws.id] or {}
+        ws.apps = applications(rows)
+        ws.windows = {}
+        for _, row in ipairs(rows) do
+            ws.windows[#ws.windows + 1] = { id = row.id, windowId = tonumber(row.windowId),
+                frame = type(row.frame) == "table" and { w = row.frame.w or row.frame.width,
+                    h = row.frame.h or row.frame.height } or nil, bundleId = row.app and row.app.bundleId,
+                appName = row.app and row.app.name }
+        end
+    end
 end
 
 function M.focused(payload)

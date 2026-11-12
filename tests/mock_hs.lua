@@ -22,17 +22,43 @@ function M.new()
         local id = e.nativeId
         return { id = function() return id end }
     end }
+    e.captures, e.snapshots = {}, {}
+    hs.window.snapshotForID = function(id)
+        e.captures[#e.captures + 1] = id
+        local size = e.snapshots[id]
+        if size == "throw" then error("Capture failed") end
+        if not size then return nil end
+        local image = { dimensions = F.copy(size), snapshotId = id }
+        function image:size(value)
+            if value then self.dimensions = F.copy(value); return self end
+            return self.dimensions
+        end
+        return image
+    end
+    function e:previewFrame()
+        for _, timer in ipairs(self.timers) do
+            if timer.active and timer.delay == 0 then
+                timer.active = false; timer.callback(); return true
+            end
+        end
+        return false
+    end
+    function e:flushPreviews()
+        local frames = 0
+        while self:previewFrame() do frames = frames + 1; assert(frames < 2000, "preview loop") end
+    end
     hs.logger = { new = function()
         return { w = function(msg) e.logs[#e.logs + 1] = msg end, df = function() end }
     end }
     hs.alert = { show = function(msg) e.alerts[#e.alerts + 1] = msg end }
-    hs.keycodes = { map = { w = 13, a = 0, v = 9 } }
+    hs.keycodes = { map = { w = 13, a = 0, v = 9, escape = 53, ["return"] = 36, padenter = 76,
+        up = 126, down = 125, delete = 51, forwarddelete = 117 } }
     hs.eventtap = {
         event = { types = { keyDown = 10, keyUp = 11, mouseMoved = 5,
-            leftMouseDown = 1, rightMouseDown = 3, scrollWheel = 22 } },
+            leftMouseDown = 1, rightMouseDown = 3, scrollWheel = 22 }, properties = { scrollWheelEventDeltaAxis1 = 1, scrollWheelEventDeltaAxis2 = 2 } },
         isSecureInputEnabled = function() return false end,
-        new = function()
-            return { start = function(self) self.enabled = true end,
+        new = function(_, callback)
+            return { callback = callback, start = function(self) self.enabled = true end,
                 stop = function(self) self.enabled = false end,
                 isEnabled = function(self) return self.enabled end }
         end,
@@ -48,8 +74,8 @@ function M.new()
     function e:token(value) sequence = sequence + 1; local token = "json:" .. sequence; tokens[token] = value; return token end
     hs.timer = {
         absoluteTime = function() e.now = e.now + 1000000; return e.now end,
-        doAfter = function(_, callback)
-            local timer = { callback = callback, active = true, stop = function(self) self.active = false end }
+        doAfter = function(delay, callback)
+            local timer = { delay = delay, callback = callback, active = true, stop = function(self) self.active = false end }
             e.timers[#e.timers + 1] = timer
             return timer
         end,
@@ -67,6 +93,13 @@ function M.new()
         e.tasks[#e.tasks + 1] = task
         return task
     end }
+    function e:drain()
+        local timers = {}
+        for _, timer in ipairs(self.timers) do
+            if timer.active and timer.delay == 0.01 then timers[#timers + 1] = timer end
+        end
+        for _, timer in ipairs(timers) do timer.active = false; timer.callback() end
+    end
     function e:step(hook)
         local task = table.remove(self.pending, 1)
         assert(task, "no pending task")
@@ -84,6 +117,7 @@ function M.new()
         end
         local output = type(payload) == "string" and payload or self:token(payload)
         task.callback(code, output, stderr)
+        self:drain()
     end
     function e:flush()
         local n = 0

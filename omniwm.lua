@@ -56,6 +56,7 @@ function M.new(hs, config, logger)
             if request.done or self.stopped then return end
             request.done = true
             if request.timer then request.timer:stop() end
+            if request.drainTimer then request.drainTimer:stop() end
             self.tasks[request] = nil
             if err then logger.w(err) end
             callback(value, err)
@@ -64,29 +65,34 @@ function M.new(hs, config, logger)
             if request.done or self.stopped then return end
             -- The completion callback contains only the output not already streamed.
             collect(stdout, stderr)
-            stdout, stderr = table.concat(stdoutChunks), table.concat(stderrChunks)
-            local decoded, decodeError
-            if not raw then
-                -- Empty output cannot be JSON; report it without invoking LuaSkin's decoder.
-                if (stdout or ""):find("%S") then
-                    decoded, decodeError = safe(hs.json.decode, stdout)
-                else
-                    decodeError = "empty stdout"
+            -- Hammerspoon can deliver a final stream notification after termination.
+            -- Yield one timer interval so queued pipe notifications reach collect().
+            request.drainTimer = hs.timer.doAfter(0.01, function()
+                if request.done or self.stopped then return end
+                stdout, stderr = table.concat(stdoutChunks), table.concat(stderrChunks)
+                local decoded, decodeError
+                if not raw then
+                    -- Empty output cannot be JSON; report it without invoking LuaSkin's decoder.
+                    if (stdout or ""):find("%S") then
+                        decoded, decodeError = safe(hs.json.decode, stdout)
+                    else
+                        decodeError = "empty stdout"
+                    end
                 end
-            end
-            if code ~= 0 then
-                local message = type(decoded) == "table" and (decoded.message or decoded.code)
-                finish(nil, command .. " (exit " .. code .. "): " .. tostring(message
-                    or ((stderr or ""):find("%S") and preview(stderr)) or preview(stdout)))
-            elseif raw then finish(stdout)
-            elseif not decoded then
-                finish(nil, "Invalid CLI JSON from " .. command .. " (exit " .. code .. "): "
-                    .. tostring(decodeError or "decoder rejected response")
-                    .. "; stdout=" .. preview(stdout) .. "; stderr=" .. preview(stderr))
-            else
-                local result, err = safe(N.unwrap, decoded, args[1] == "query" and args[2] or nil)
-                finish(result, err)
-            end
+                if code ~= 0 then
+                    local message = type(decoded) == "table" and (decoded.message or decoded.code)
+                    finish(nil, command .. " (exit " .. code .. "): " .. tostring(message
+                        or ((stderr or ""):find("%S") and preview(stderr)) or preview(stdout)))
+                elseif raw then finish(stdout)
+                elseif not decoded then
+                    finish(nil, "Invalid CLI JSON from " .. command .. " (exit " .. code .. "): "
+                        .. tostring(decodeError or "decoder rejected response")
+                        .. "; stdout=" .. preview(stdout) .. "; stderr=" .. preview(stderr))
+                else
+                    local result, err = safe(N.unwrap, decoded, args[1] == "query" and args[2] or nil)
+                    finish(result, err)
+                end
+            end)
         end, function(_, stdout, stderr)
             -- Drain both pipes while the CLI runs. Large responses otherwise block
             -- the child before it can exit and invoke the completion callback.
@@ -119,12 +125,20 @@ function M.new(hs, config, logger)
         end)
     end
 
-    function self:refresh(callback)
+    function self:refresh(callback, includeWindows)
         self:query("workspaces", function(payload, err)
             if not payload then callback(nil, err); return end
             local workspaces, why = safe(N.workspaces, payload)
             if not workspaces then callback(nil, why); return end
             if #workspaces == 0 then callback(nil, "No available workspaces"); return end
+            if includeWindows then
+                self:query("windows", function(windows, windowError)
+                    if not windows then callback(nil, windowError); return end
+                    local merged, mergeError = safe(function() N.mergeWindows(workspaces, windows); return true end)
+                    callback(merged and workspaces or nil, mergeError)
+                end)
+                return
+            end
             self:query("workspace-bar", function(bar)
                 local complete = bar and safe(N.mergeBar, workspaces, bar)
                 if complete then callback(workspaces); return end
@@ -134,6 +148,23 @@ function M.new(hs, config, logger)
                     callback(merged and workspaces or nil, mergeError)
                 end)
             end)
+        end)
+    end
+
+    function self:switch(destinationId, callback)
+        self:query("workspaces", function(payload, err)
+            if not payload then callback(nil, err); return end
+            local workspaces, why = safe(N.workspaces, payload)
+            if not workspaces then callback(nil, why); return end
+            for _, ws in ipairs(workspaces) do
+                if ws.id == destinationId then
+                    self:run({ "command", "switch-workspace", tostring(ws.number) }, function(result, switchError)
+                        callback(result ~= nil and true or nil, switchError)
+                    end)
+                    return
+                end
+            end
+            callback(nil, "No available workspaces")
         end)
     end
 
@@ -230,6 +261,7 @@ function M.new(hs, config, logger)
         for request in pairs(self.tasks) do
             request.done = true
             if request.timer then request.timer:stop() end
+            if request.drainTimer then request.drainTimer:stop() end
             request.task:setCallback(nil)
             request.task:terminate()
         end

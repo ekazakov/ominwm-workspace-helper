@@ -2,6 +2,11 @@
 local M = {}
 local strings = {
     en = {
+        emptyWorkspace = "Empty workspace", loadingPreviews = "Loading previews…",
+        switchLetters = "Letter to switch · / to search",
+        switchSearch = "Search · Esc to return:",
+        switchPrefix = "Next letter:",
+        switchPlaceholder = "Switch to workspace…",
         keyboardUnavailable = "Cannot capture keyboard input. Check Hammerspoon permissions and close password fields (Secure Input).",
         placeholder = "Move column → workspace…", loading = "Loading workspaces…",
         empty = "No apps", unknownApp = "Unknown app", noDestinations = "No available destinations",
@@ -20,6 +25,11 @@ local strings = {
         invalidData = "OmniWM returned unexpected data. See Hammerspoon Console for details.",
     },
     de = {
+        emptyWorkspace = "Leerer Arbeitsbereich", loadingPreviews = "Vorschaubilder werden geladen…",
+        switchLetters = "Buchstabe zum Wechseln · / zur Suche",
+        switchSearch = "Suche · Esc zurück:",
+        switchPrefix = "Nächster Buchstabe:",
+        switchPlaceholder = "Arbeitsbereich wechseln…",
         keyboardUnavailable = "Tastatureingabe nicht verfügbar. Hammerspoon-Berechtigungen prüfen und Passwortfelder schließen (Secure Input).",
         placeholder = "Spalte verschieben → Arbeitsbereich…", loading = "Arbeitsbereiche werden geladen…",
         empty = "Keine Apps", unknownApp = "Unbekannte App", noDestinations = "Keine verfügbaren Ziele",
@@ -38,6 +48,11 @@ local strings = {
         invalidData = "OmniWM hat unerwartete Daten zurückgegeben. Details stehen in der Hammerspoon-Konsole.",
     },
     ru = {
+        emptyWorkspace = "Пустой воркспейс", loadingPreviews = "Загрузка снимков…",
+        switchLetters = "Буква — перейти · / — поиск",
+        switchSearch = "Поиск · Esc — назад:",
+        switchPrefix = "Следующая буква:",
+        switchPlaceholder = "Перейти на воркспейс…",
         keyboardUnavailable = "Не удалось перехватить клавиатуру. Проверьте разрешения Hammerspoon и закройте поля паролей (Secure Input).",
         placeholder = "Перенести колонку → воркспейс…", loading = "Загрузка воркспейсов…",
         empty = "Нет приложений", unknownApp = "Неизвестное приложение", noDestinations = "Нет доступных назначений",

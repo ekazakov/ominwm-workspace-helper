@@ -1,6 +1,7 @@
 -- Override these values in ~/.hammerspoon/init.lua; no dependencies required.
 return {
-    hotkey = { modifiers = { "ctrl", "alt", "shift", "cmd" }, key = "W" },
+    hotkey = { modifiers = { "ctrl", "alt", "shift" }, key = "W" },
+    switchHotkey = { modifiers = { "ctrl", "alt", "shift", "cmd" }, key = "W" },
     maxIcons = 5,
     iconSize = 22,
     theme = "dark",
@@ -11,6 +12,7 @@ return {
     debug = false,
     cliPath = nil,
     taskTimeout = 5,
+    previewRefreshInterval = 30,
     iconCacheLimit = 128,
     compositeCacheLimit = 128,
     rows = 8,

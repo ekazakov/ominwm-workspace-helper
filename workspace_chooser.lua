@@ -21,7 +21,8 @@ function M.new(hs, config, cli, icons, logger)
         if not self.chooser or not self.cache then return end
         local choices, fingerprint = {}, {}
         for _, ws in ipairs(self.cache) do
-            local current = self.source and self.source.workspaceId == ws.id
+            local current = (self.mode == "switch" and ws.current)
+                or (self.source and self.source.workspaceId == ws.id)
             if (config.showCurrentWorkspace or not current)
                 and (config.showEmptyWorkspaces or (ws.count or #ws.apps) > 0) then
                 local names = {}
@@ -34,13 +35,14 @@ function M.new(hs, config, cli, icons, logger)
                 local subText = ws.displayName
                 local searchText = text .. " " .. subText
                 if config.searchAppNames then searchText = searchText .. " " .. table.concat(names, " ") end
-                local ok, image = pcall(icons.composite, icons, ws.apps)
+                local ok, image = true, nil
+                if self.mode ~= "switch" then ok, image = pcall(icons.composite, icons, ws.apps) end
                 if not ok then logger.w("Icon rendering failed: " .. tostring(image)); image = nil end
                 local cells = math.max(1, math.min(#ws.apps, config.maxIcons)) + (#ws.apps > config.maxIcons and 1 or 0)
                 choices[#choices + 1] = { text = text, subText = subText, searchText = searchText,
-                    image = image, imageWidth = cells * config.iconSize, workspaceId = ws.id,
+                    image = image, imageWidth = cells * config.iconSize, windows = ws.windows, workspaceId = ws.id,
                     displayId = ws.displayId, displayName = ws.displayName }
-                fingerprint[#fingerprint + 1] = { ws.id, text, subText, ws.displayId, ws.apps }
+                fingerprint[#fingerprint + 1] = { ws.id, text, subText, ws.displayId, ws.apps, ws.windows }
             end
         end
         local signature = hs.json.encode(fingerprint)
@@ -69,8 +71,12 @@ function M.new(hs, config, cli, icons, logger)
 
     function self:refresh(callback)
         if callback then self.refreshWaiters[#self.refreshWaiters + 1] = callback end
-        if self.refreshing then return end
+        if self.refreshing then
+            if self.mode == "switch" and not self.refreshingPreviews then self.previewRefreshPending = true end
+            return
+        end
         self.refreshing = true
+        self.refreshingPreviews = self.mode == "switch" or config.previewRefreshInterval > 0
         local started = now()
         cli:refresh(function(workspaces, err)
             if self.stopped then return end
@@ -78,12 +84,23 @@ function M.new(hs, config, cli, icons, logger)
             metric("refreshMs", started)
             if workspaces then
                 self.cache = workspaces
+                if self.refreshingPreviews then
+                    local windows = {}
+                    for _, ws in ipairs(workspaces) do
+                        for _, window in ipairs(ws.windows or {}) do windows[#windows + 1] = window end
+                    end
+                    self.chooser.previews:sync(windows, self.backgroundCapture == true)
+                end
                 if self.active and self.chooser:isVisible() then self:render() end
             end
             local waiters = self.refreshWaiters
             self.refreshWaiters = {}
             for _, waiter in ipairs(waiters) do waiter(workspaces, err) end
-        end)
+            if self.previewRefreshPending then
+                self.previewRefreshPending = false
+                self:refresh()
+            end
+        end, self.refreshingPreviews)
     end
 
     self.chooser = Picker.new(hs, config, locale, function(choice)
@@ -91,18 +108,40 @@ function M.new(hs, config, cli, icons, logger)
         local source = self.source
         self.active, self.source = false, nil
         self.epoch = self.epoch + 1
-        if not choice or not choice.workspaceId or not source then return end
+        if not choice or not choice.workspaceId or (self.mode ~= "switch" and not source) then return end
         self.moving = true
         local started = now()
         -- The non-activating palette is hidden before focus restoration.
-        cli:move(source, choice.workspaceId, function(ok, err)
+        local switching = self.mode == "switch"
+        local function completed(ok, err)
             if self.stopped then return end
             self.moving = false
-            metric("moveMs", started)
+            metric(switching and "switchMs" or "moveMs", started)
             if not ok then notify(err); return end
             self:refresh()
-        end)
-    end)
+        end
+        if switching then cli:switch(choice.workspaceId, completed)
+        else cli:move(source, choice.workspaceId, completed) end
+    end, function(bundle) return icons:app(bundle) end)
+
+    function self:startBackgroundPreviews()
+        if self.stopped or self.backgroundStarted then return end
+        self.backgroundStarted = true
+        local function tick()
+            if self.stopped then return end
+            if not self.refreshing and not self.chooser.previews.timer then
+                self.backgroundCapture = true
+                self:refresh(function(_, err)
+                    self.backgroundCapture = false
+                    if err then logger.w("Preview refresh failed: " .. tostring(err)) end
+                end)
+            end
+            if config.previewRefreshInterval > 0 then
+                self.backgroundTimer = hs.timer.doAfter(config.previewRefreshInterval, tick)
+            end
+        end
+        if config.previewRefreshInterval > 0 then tick() else self:refresh() end
+    end
 
     function self:cancel()
         self.active, self.source = false, nil
@@ -110,21 +149,28 @@ function M.new(hs, config, cli, icons, logger)
         if self.chooser:isVisible() then self.chooser:cancel() end
     end
 
-    function self:toggle()
+    function self:toggle(mode)
+        mode = mode or "move"
         if self.stopped or self.moving then return end
-        if self.active then self:cancel(); return end
+        if self.active then
+            local previousMode = self.mode
+            self:cancel()
+            if previousMode == mode then return end
+        end
+        self.mode = mode
+        self.chooser:begin(mode)
         self.active = true
         self.epoch = self.epoch + 1
         local epoch, started = self.epoch, now()
         local warm = self.cache ~= nil
         local native = hs.window.frontmostWindow()
         local nativeId = native and native:id()
-        if not nativeId then self:cancel(); notify("No native window focused"); return end
+        if mode ~= "switch" and not nativeId then self:cancel(); notify("No native window focused"); return end
         local function valid() return not self.stopped and self.active and self.epoch == epoch end
         local function fail(err) if valid() then self:cancel(); notify(err) end end
         local function capture()
             if not valid() then return end
-            cli:capture(function(source, err)
+            local function captured(source, err)
                 if not valid() then return end
                 if not source then fail(err); return end
                 self.source, self.signature = source, nil
@@ -137,7 +183,7 @@ function M.new(hs, config, cli, icons, logger)
                 end
                 if self.cache then
                     show()
-                    if config.refreshOnOpen then
+                    if config.refreshOnOpen or mode == "switch" then
                         self:refresh(function(_, refreshError)
                             if valid() and refreshError then logger.w("Workspace refresh failed: " .. refreshError) end
                         end)
@@ -152,7 +198,9 @@ function M.new(hs, config, cli, icons, logger)
                         self:render()
                     end)
                 end
-            end, nativeId)
+            end
+            if mode == "switch" then captured({})
+            else cli:capture(captured, nativeId) end
         end
         if cli.ready then capture()
         else cli:check(function(ok, err) if ok then capture() else fail(err) end end) end
@@ -161,6 +209,7 @@ function M.new(hs, config, cli, icons, logger)
     function self:stop()
         self:cancel()
         self.stopped = true
+        if self.backgroundTimer then self.backgroundTimer:stop(); self.backgroundTimer = nil end
         self.chooser:delete()
         self.chooser, self.cache, self.refreshWaiters = nil, nil, {}
     end
