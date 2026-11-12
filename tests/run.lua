@@ -25,6 +25,7 @@ local function app(overrides)
     local e = Mock.new()
     _G.hs = e.hs
     local instance = Project.new(overrides):start()
+    e.chooser = instance.ui.chooser
     e:flush()
     return e, instance
 end
@@ -58,6 +59,11 @@ end)
 test("version and numeric command contract are gated", function()
     eq(N.capabilities(F.capabilities), true)
     local caps = F.copy(F.capabilities); caps.appVersion = "0.8.0"
+    caps.protocolVersion = 22
+    eq(N.capabilities(caps), true)
+    caps.protocolVersion = 19
+    rejects(function() N.capabilities(caps) end, "Supported OmniWM version")
+    caps.appVersion = "0.9.0"
     rejects(function() N.capabilities(caps) end, "Supported OmniWM version")
     caps = F.copy(F.capabilities); caps.commands[1].arguments[1].kind = "string"
     rejects(function() N.capabilities(caps) end, "Required OmniWM")
@@ -146,6 +152,39 @@ test("invalid JSON and nonzero task exits propagate errors", function()
     e:step(function() return { ok = false, message = "IPC unavailable" }, 2 end)
     assert(err:find("IPC unavailable"))
 end)
+test("large streamed JSON is assembled with the completion tail", function()
+    local e, api = cli()
+    local result, err
+    api:query("capabilities", function(value, why) result, err = value, why end)
+    local task = e.tasks[1]
+    -- Keep the real pipe-buffer boundary in this regression, even with token JSON.
+    local output = string.rep(" ", 70000) .. e:token(F.envelope("capabilities", F.capabilities))
+    local decode = e.hs.json.decode
+    e.hs.json.decode = function(value) return decode(value:match("^%s*(.*)$")) end
+    for offset = 1, 65536, 4096 do
+        eq(task.streamCallback(task, output:sub(offset, offset + 4095), ""), true)
+    end
+    eq(result, nil)
+    task.callback(0, output:sub(65537), "")
+    eq(err, nil); eq(N.capabilities(result), true)
+    eq(e.timers[1].active, false); eq(next(api.tasks), nil)
+end)
+test("streamed stderr and raw stdout preserve all chunks without duplicate callbacks", function()
+    local e, api = cli()
+    local result, err, count = nil, nil, 0
+    api:query("windows", function(value, why) result, err = value, why; count = count + 1 end)
+    local task = e.tasks[1]
+    task.streamCallback(task, "", "permission ")
+    task.callback(2, "", "denied")
+    assert(err:find("permission denied")); eq(count, 1); eq(result, nil)
+    task.streamCallback(nil, "ignored", "ignored")
+    eq(count, 1)
+    api:run({ "version" }, function(value) result = value end, true)
+    task = e.tasks[2]
+    task.streamCallback(task, "Omni", "")
+    task.callback(0, "WM", "")
+    eq(result, "OmniWM")
+end)
 test("timeout reports once; late callbacks and stop cannot continue a transaction", function()
     local e, api = cli(); local count = 0
     api:query("windows", function() count = count + 1 end)
@@ -179,7 +218,7 @@ test("start, warm chooser, Escape, repeat start and stop free resources", functi
     e.chooser:cancel(); eq(#e:moves(), 0)
     instance:toggle(); e:flush(); eq(instance.icons.builds, builds)
     assert(instance:diagnostics().metrics.warmOpenMs)
-    instance:stop(); instance:stop(); eq(e.hotkeys, 0); eq(e.canvases, 0); eq(e.chooser.deleted, true)
+    instance:stop(); instance:stop(); eq(e.hotkeys, 0); eq(e.canvases, 0); eq(e.chooser.canvas.deleted, true)
 end)
 test("new instance stops previous hotkey even after module reload", function()
     local e, first = app()

@@ -117,8 +117,10 @@ function M.column(payload, source)
 end
 
 function M.capabilities(payload)
-    assert(payload.appVersion == "0.7.6" and payload.protocolVersion == 19,
-        "Supported OmniWM version: 0.7.6 / protocol 19; check compatibility before using another version")
+    local protocols = { ["0.7.6"] = 19, ["0.8.0"] = 22 }
+    assert(protocols[payload.appVersion] and protocols[payload.appVersion] == payload.protocolVersion,
+        "Supported OmniWM versions: 0.7.6 / protocol 19, 0.8.0 / protocol 22; received "
+            .. tostring(payload.appVersion) .. " / protocol " .. tostring(payload.protocolVersion))
     local move, focus, queries = false, false, {}
     for _, cmd in ipairs(object(payload.commands, "command registry")) do
         if cmd.name == "move-column-to-workspace" then

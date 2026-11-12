@@ -47,6 +47,11 @@ function M.new(hs, config, logger)
             return text:sub(1, 240)
         end
         local request = { done = false }
+        local stdoutChunks, stderrChunks = {}, {}
+        local function collect(stdout, stderr)
+            stdoutChunks[#stdoutChunks + 1] = stdout or ""
+            stderrChunks[#stderrChunks + 1] = stderr or ""
+        end
         local function finish(value, err)
             if request.done or self.stopped then return end
             request.done = true
@@ -57,6 +62,9 @@ function M.new(hs, config, logger)
         end
         local ok, task = pcall(hs.task.new, self.path, function(code, stdout, stderr)
             if request.done or self.stopped then return end
+            -- The completion callback contains only the output not already streamed.
+            collect(stdout, stderr)
+            stdout, stderr = table.concat(stdoutChunks), table.concat(stderrChunks)
             local decoded, decodeError
             if not raw then
                 -- Empty output cannot be JSON; report it without invoking LuaSkin's decoder.
@@ -79,12 +87,18 @@ function M.new(hs, config, logger)
                 local result, err = safe(N.unwrap, decoded, args[1] == "query" and args[2] or nil)
                 finish(result, err)
             end
+        end, function(_, stdout, stderr)
+            -- Drain both pipes while the CLI runs. Large responses otherwise block
+            -- the child before it can exit and invoke the completion callback.
+            if not request.done and not self.stopped then collect(stdout, stderr) end
+            return true
         end, taskArgs)
         if not ok or not task then finish(nil, "Cannot create omniwmctl task: " .. tostring(task)); return end
         request.task = task
         self.tasks[request] = true
         request.timer = hs.timer.doAfter(config.taskTimeout, function()
-            finish(nil, "omniwmctl timed out; command outcome may be unknown")
+            finish(nil, "omniwmctl timed out after " .. config.taskTimeout
+                .. "s (" .. command .. "); command outcome may be unknown")
             task:terminate()
         end)
         if not task:start() then finish(nil, "Cannot start omniwmctl at " .. self.path) end

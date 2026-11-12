@@ -26,6 +26,23 @@ function M.new()
         return { w = function(msg) e.logs[#e.logs + 1] = msg end, df = function() end }
     end }
     hs.alert = { show = function(msg) e.alerts[#e.alerts + 1] = msg end }
+    hs.keycodes = { map = { w = 13, a = 0, v = 9 } }
+    hs.eventtap = {
+        event = { types = { keyDown = 10, keyUp = 11, mouseMoved = 5,
+            leftMouseDown = 1, rightMouseDown = 3, scrollWheel = 22 } },
+        isSecureInputEnabled = function() return false end,
+        new = function()
+            return { start = function(self) self.enabled = true end,
+                stop = function(self) self.enabled = false end,
+                isEnabled = function(self) return self.enabled end }
+        end,
+    }
+    hs.screen = { mainScreen = function()
+        return { frame = function() return { x = 0, y = 0, w = 1440, h = 900 } end }
+    end }
+    hs.styledtext = { new = function(value)
+        return { lower = function() return { getString = function() return value:lower() end } end }
+    end }
     local tokens, sequence = {}, 0
     hs.json = { encode = encode, decode = function(token) return assert(tokens[token], "invalid JSON") end }
     function e:token(value) sequence = sequence + 1; local token = "json:" .. sequence; tokens[token] = value; return token end
@@ -37,8 +54,8 @@ function M.new()
             return timer
         end,
     }
-    hs.task = { new = function(path, callback, args)
-        local task = { path = path, callback = callback, args = args }
+    hs.task = { new = function(path, callback, streamCallback, args)
+        local task = { path = path, callback = callback, streamCallback = streamCallback, args = args }
         function task:start()
             if e.failStart then return false end
             e.pending[#e.pending + 1] = self
@@ -85,10 +102,14 @@ function M.new()
     hs.canvas = { new = function()
         e.canvases = e.canvases + 1
         local canvas = {}
+        for _, method in ipairs({ "level", "behaviorAsLabels", "clickActivating", "frame", "show", "hide" }) do
+            canvas[method] = function(self) return self end
+        end
+        function canvas:minimumTextSize() return { w = 100, h = 20 } end
         function canvas:size(size) self.dimensions = size; return self end
         function canvas:replaceElements(...) self.elements = { ... }; return self end
         function canvas:imageFromCanvas() return { elements = F.copy(self.elements), size = F.copy(self.dimensions) } end
-        function canvas:delete() e.canvases = e.canvases - 1 end
+        function canvas:delete() self.deleted = true; e.canvases = e.canvases - 1 end
         return canvas
     end }
     hs.hotkey = { bind = function(_, _, callback)
