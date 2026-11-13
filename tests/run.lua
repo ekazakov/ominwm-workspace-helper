@@ -618,25 +618,25 @@ test("a switch opened during an icon refresh receives a follow-up window refresh
     instance:stop()
 end)
 
-test("mixed preview rows compact empty workspaces and keep controls centered", function()
+test("mixed preview rows give empty workspaces the same height", function()
     local _, ui, _, _, items = picker(9)
     previewRows(ui, items, 0)
     items[2].windows = { { id = "window", windowId = 101 } }
     ui:choices(items)
     local first, second, third = ui.hitRows[1], ui.hitRows[2], ui.hitRows[3]
-    eq(first.bottom - first.top + 1, 31)
+    eq(first.bottom - first.top + 1, 102)
     eq(second.bottom - second.top + 1, 102)
-    eq(second.top - first.top, 31); eq(third.top - second.top, 102)
-    eq(#ui.hitRows, 9)
+    eq(second.top - first.top, 102); eq(third.top - second.top, 102)
+    eq(#ui.hitRows, 7)
     for _, el in ipairs(ui.canvas.elements) do
         if el.text == "Workspace 1" then
             eq(el.frame.w, items[1].labelWidth)
-            eq(el.frame.x - (ui.previewColumn.x + ui.previewColumn.w), 5)
-            eq(el.frame.y, first.top + (31 - 24) / 2)
+            eq(ui.previewColumn.x - (el.frame.x + el.frame.w), 5)
+            eq(el.frame.y, first.top + 6)
         elseif el.text == "A" then eq(el.frame.y, first.top + (31 - 36) / 2 + 7) end
     end
     items[2].windows = {}; ui:choices(items)
-    eq(ui.hitRows[2].bottom - ui.hitRows[2].top + 1, 31)
+    eq(ui.hitRows[2].bottom - ui.hitRows[2].top + 1, 102)
     ui:selectedRow(9); eq(ui.hitRows[#ui.hitRows].index, 9)
 end)
 
@@ -820,7 +820,7 @@ test("preview clicks activate that window but workspace label clicks only highli
             location = function() return { x = ui.frame.x + x, y = ui.frame.y + y } end })
     end
     local hit = ui.hitRows[2]
-    click(ui.frame.w - 30, hit.top + 25); eq(ui.row, 2); eq(selected(), nil)
+    click(12, hit.top + 25); eq(ui.row, 2); eq(selected(), nil)
     local preview = ui.hitRows[2].previews[2]
     click(preview.left + 10, hit.top + 25)
     eq(selected().window.id, items[2].windows[2].id)
@@ -841,7 +841,7 @@ test("badges center on previews and empty placeholders with unchanged style", fu
             eq(square.fillColor.alpha, 0.4); eq(square.roundedRectRadii.xRadius, 8)
         end
     end
-    eq(found, true); eq(ui.previewColumn.x, 10)
+    eq(found, true); eq(ui.previewColumn.x, 115)
 end)
 test("capacity growth rebuilds uniform shortcuts and resets pending input", function()
     local _, ui, key, _, items = picker(676)
@@ -1054,7 +1054,7 @@ test("display names appear only with multiple connected displays", function()
     ui:show(); eq(hasText(ui, "Display"), true)
 end)
 
-test("switch rows show only numbers and empty rows have gray borders", function()
+test("switch rows show only numbers and empty rows show Empty without borders", function()
     local e, instance = app()
     instance:toggleSwitch(); e:flush()
     local ui = instance.ui.chooser
@@ -1075,7 +1075,7 @@ test("switch rows show only numbers and empty rows have gray borders", function(
             eq(element.strokeWidth, 1)
         end
     end
-    eq(borders, 1)
+    eq(borders, 0); eq(hasText(panel, "Empty"), true)
 end)
 
 test("switch height fits content and updates after filtering and refresh", function()
@@ -1085,7 +1085,7 @@ test("switch height fits content and updates after filtering and refresh", funct
     ui:query("Workspace 2"); eq(ui.frame.h, 12 + 102)
     ui:query(""); eq(ui.frame.h, 12 + 3 * 102)
     items[2].windows = {}; ui:choices(items)
-    eq(ui.frame.h, 12 + 2 * 102 + 31)
+    eq(ui.frame.h, 12 + 3 * 102)
     ui:choices({}); eq(ui.frame.h, 42)
 end)
 test("content height includes display headings and keeps overflowing rows reachable", function()

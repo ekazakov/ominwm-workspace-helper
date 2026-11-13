@@ -160,7 +160,6 @@ function M.new(hs, config, locale, completion, fallback)
     local header, rowHeight, padding, groupHeight = 62, math.max(46, config.iconSize + 16), 12, 28
     local switchPadding, switchEdge, previewGap, labelGap = 6, 10, 6, 5
     local function switchRowHeight(choice)
-        if choice.windows and #choice.windows == 0 then return 31 end
         return Previews.height + 12
     end
     local dark = config.theme == "dark"
@@ -303,8 +302,9 @@ function M.new(hs, config, locale, completion, fallback)
         if self.mode == "switch" then
             iconX = switchEdge
             labelWidth = math.min(longestLabel, math.max(1, frame.w - switchEdge - iconX - labelGap - math.max(36, (self.shortcutLength or 1) * 10 + 16)))
-            textX = frame.w - switchEdge - labelWidth
-            self.previewColumn = { x = iconX, w = math.max(1, textX - labelGap - iconX) }
+            textX = switchEdge
+            iconX = textX + labelWidth + labelGap
+            self.previewColumn = { x = iconX, w = math.max(1, frame.w - switchEdge - iconX) }
         end
         for _, entry in ipairs(entries) do
             local y = entry.y
@@ -320,13 +320,6 @@ function M.new(hs, config, locale, completion, fallback)
                         roundedRectRadii = { xRadius = 7, yRadius = 7 },
                         fillColor = { white = dark and 1 or 0, alpha = 0.12 },
                         frame = { x = padding, y = y, w = frame.w - padding * 2, h = rowHeight - rowGap } }
-                end
-                if self.mode == "switch" and choice.workspaceId and choice.windows and #choice.windows == 0 then
-                    elements[#elements + 1] = { type = "rectangle", action = "stroke", strokeWidth = 1,
-                        roundedRectRadii = { xRadius = 7, yRadius = 7 },
-                        strokeColor = { white = 0.5, alpha = 0.65 },
-                        frame = { x = padding + 0.5, y = y + 0.5,
-                            w = frame.w - padding * 2 - 1, h = rowHeight - rowGap - 1 } }
                 end
                 if self.mode == "switch" and choice.workspaceId then
                     local column = self.previewColumn
@@ -359,7 +352,9 @@ function M.new(hs, config, locale, completion, fallback)
                             w = column.w, h = #windows > 0 and Previews.height or rowHeight } }
                     self.hitRows[#self.hitRows].previews = {}
                     if #windows == 0 then
-                        if not choice.windows then
+                        if choice.windows then
+                            elements[#elements + 1] = text("Empty", column.x, y + 6, column.w, 24, 16, muted)
+                        else
                             elements[#elements + 1] = text(locale:text("loadingPreviews"),
                                 column.x, y + (rowHeight - 24) / 2, column.w, 24, 16, muted)
                         end
@@ -397,9 +392,9 @@ function M.new(hs, config, locale, completion, fallback)
                             x = iconX, y = y + (rowHeight - config.iconSize) / 2,
                             w = choice.imageWidth or config.iconSize, h = config.iconSize } }
                 end
-                elements[#elements + 1] = text(choice.text, choice.workspaceId and textX or 20, y + (self.mode == "switch" and choice.workspaceId and (rowHeight - 24) / 2 or 12),
+                elements[#elements + 1] = text(choice.text, choice.workspaceId and textX or 20, y + (self.mode == "switch" and choice.workspaceId and 6 or 12),
                     choice.workspaceId and labelWidth or frame.w - 40, 24, 16,
-                    self.mode == "switch" and choice.workspaceId and muted or foreground)
+                    self.mode == "switch" and choice.workspaceId and { white = 1 } or foreground)
                 if self.mode ~= "switch" and choice.workspaceId and choice.valid ~= false and index <= 9 then
                     elements[#elements + 1] = text("⌘" .. index, frame.w - 58, y + 13, 36, 22, 15, muted, "right")
                 end
