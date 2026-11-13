@@ -30,8 +30,10 @@ function M.new(hs, config, cli, icons, logger)
                     names[#names + 1] = app.name == "Unknown app" and locale:text("unknownApp") or app.name
                 end
                 local text = tostring(ws.number)
-                if ws.name ~= text then text = text .. " — " .. ws.name end
-                if current then text = "● " .. text end
+                if self.mode ~= "switch" then
+                    if ws.name ~= text then text = text .. " — " .. ws.name end
+                    if current then text = "● " .. text end
+                end
                 local subText = ws.displayName
                 local searchText = text .. " " .. subText
                 if config.searchAppNames then searchText = searchText .. " " .. table.concat(names, " ") end
@@ -40,7 +42,7 @@ function M.new(hs, config, cli, icons, logger)
                 if not ok then logger.w("Icon rendering failed: " .. tostring(image)); image = nil end
                 local cells = math.max(1, math.min(#ws.apps, config.maxIcons)) + (#ws.apps > config.maxIcons and 1 or 0)
                 choices[#choices + 1] = { text = text, subText = subText, searchText = searchText,
-                    image = image, imageWidth = cells * config.iconSize, windows = ws.windows, workspaceId = ws.id,
+                    number = ws.number, image = image, imageWidth = cells * config.iconSize, windows = ws.windows, workspaceId = ws.id,
                     displayId = ws.displayId, displayName = ws.displayName }
                 fingerprint[#fingerprint + 1] = { ws.id, text, subText, ws.displayId, ws.apps, ws.windows }
             end

@@ -22,7 +22,8 @@ function M.new(hs, config, locale, completion, fallback)
         17, 16, 32, 34, 31, 35, 6, 7, 8, 9, 11, 45, 46 }
     local letterByCode = {}
     for i, code in ipairs(letterCodes) do letterByCode[code] = letters:sub(i, i) end
-    local slashCode = 44
+    local numberByCode = { [18] = "1", [19] = "2", [20] = "3", [21] = "4", [23] = "5",
+        [22] = "6", [26] = "7", [28] = "8", [25] = "9", [29] = "0" }
 
     local function targetKey(choice, window)
         if window then return "window:" .. tostring(window.id) .. ":" .. tostring(window.windowId) end
@@ -30,7 +31,7 @@ function M.new(hs, config, locale, completion, fallback)
     end
     local function targets(choice)
         if not choice.workspaceId or choice.valid == false or not choice.windows then return {} end
-        if #choice.windows == 0 then return { { key = targetKey(choice) } } end
+        if #choice.windows == 0 then return {} end
         local out = {}
         for i, window in ipairs(choice.windows) do
             if window.id and window.windowId then
@@ -42,6 +43,8 @@ function M.new(hs, config, locale, completion, fallback)
     local function nowMs() return hs.timer.absoluteTime() / 1e6 end
 
     function self:resetSequence(redraw)
+        if self.numberTimer then self.numberTimer:stop(); self.numberTimer = nil end
+        self.pendingNumber = ""
         local hadPrefix = self.pendingPrefix and self.pendingPrefix ~= ""
         if self.sequenceTimer then self.sequenceTimer:stop(); self.sequenceTimer = nil end
         self.sequenceGeneration = (self.sequenceGeneration or 0) + 1
@@ -132,8 +135,34 @@ function M.new(hs, config, locale, completion, fallback)
         self:draw()
     end
 
+    function self:number(digit)
+        local number = (self.pendingNumber or "") .. digit
+        self:resetSequence()
+        local exact, longer
+        for row, choice in ipairs(self.filtered) do
+            local value = tostring(choice.number or "")
+            if value == number then exact = row end
+            if #value > #number and value:sub(1, #number) == number then longer = true end
+        end
+        if exact then self:selectedRow(exact) end
+        if longer then
+            self.pendingNumber = number
+            local generation = self.sequenceGeneration
+            self.numberTimer = hs.timer.doAfter(config.shortcutSequenceTimeoutMs / 1000, function()
+                if generation ~= self.sequenceGeneration then return end
+                self:resetSequence()
+                if exact then self:select(exact, nil, true) end
+            end)
+        elseif exact then self:select(exact, nil, true) end
+    end
+
     local selectAllCode, pasteCode = keys.a, keys.v
     local header, rowHeight, padding, groupHeight = 62, math.max(46, config.iconSize + 16), 12, 28
+    local switchPadding, switchEdge, previewGap, labelGap = 6, 10, 6, 5
+    local function switchRowHeight(choice)
+        if choice.windows and #choice.windows == 0 then return 31 end
+        return Previews.height + 12
+    end
     local dark = config.theme == "dark"
     local foreground = { white = dark and 0.95 or 0.12 }
     local muted = { white = dark and 0.6 or 0.4 }
@@ -165,6 +194,24 @@ function M.new(hs, config, locale, completion, fallback)
             { white = 1, alpha = 1 }, "center")
     end
 
+    function self:fitSwitchHeight()
+        if self.mode ~= "switch" then return end
+        local height, previous = switchPadding * 2, nil
+        for _, choice in ipairs(self.filtered) do
+            local group = choice.displayId or choice.displayName or ""
+            if self.showDisplayNames and choice.workspaceId and group ~= previous then height = height + 24 end
+            height = height + switchRowHeight(choice)
+            previous = group
+        end
+        if #self.filtered == 0 then height = height + 30 end
+        height = math.min(height, self.screenFrame.h - 80)
+        if self.frame.h ~= height then
+            self.frame.h = height
+            self.frame.y = self.screenFrame.y + math.max(20, (self.screenFrame.h - height) / 3)
+            canvas:frame(self.frame)
+        end
+    end
+
     function self:fitSwitchWidth()
         if self.mode ~= "switch" or not self.screenFrame then return end
         local longestPreview, longestLabel = 0, 0
@@ -173,14 +220,14 @@ function M.new(hs, config, locale, completion, fallback)
             if choice.workspaceId then
                 local width = 0
                 for i, window in ipairs(choice.windows or {}) do
-                    width = width + self.previews:get(window).width + (i > 1 and 12 or 0)
+                    width = width + self.previews:get(window).width + (i > 1 and previewGap or 0)
                 end
                 longestPreview = math.max(longestPreview, width, minimumPreview)
                 longestLabel = math.max(longestLabel, choice.labelWidth or 0)
             end
         end
         local screen = self.screenFrame
-        local desired = longestPreview > 0 and (20 + longestPreview + 10 + longestLabel + 20) or 320
+        local desired = longestPreview > 0 and (switchEdge * 2 + longestPreview + labelGap + longestLabel) or 320
         local width = math.min(desired, screen.w * 0.8, screen.w - 40)
         if self.frame.w ~= width then
             self.frame.w, self.frame.x = width, screen.x + (screen.w - width) / 2
@@ -191,8 +238,12 @@ function M.new(hs, config, locale, completion, fallback)
     function self:draw()
         if not self.visible then return end
         self:fitSwitchWidth()
+        self:fitSwitchHeight()
         local frame = self.frame
-        local rowHeight = self.mode == "switch" and (Previews.height + 24) or rowHeight
+        local padding = self.mode == "switch" and switchPadding or padding
+        local groupHeight = self.mode == "switch" and 24 or groupHeight
+        local header = self.mode == "switch" and 0 or header
+        local rowHeight = self.mode == "switch" and (Previews.height + 12) or rowHeight
         local rows = self.mode == "switch" and #self.filtered or config.rows
         self.offset = math.max(0, math.min(self.offset, math.max(0, #self.filtered - 1)))
         if self.row <= self.offset then self.offset = math.max(0, self.row - 1) end
@@ -203,11 +254,8 @@ function M.new(hs, config, locale, completion, fallback)
             for index = self.offset + 1, math.min(#self.filtered, self.offset + rows) do
                 local choice = self.filtered[index]
                 local group = choice.displayId or choice.displayName or ""
-                local isHeader = choice.workspaceId and group ~= previous
-                local height = rowHeight
-                if self.mode == "switch" and choice.windows and #choice.windows == 0 then
-                    height = math.floor(rowHeight / 3 + 0.5)
-                end
+                local isHeader = self.showDisplayNames and choice.workspaceId and group ~= previous
+                local height = self.mode == "switch" and switchRowHeight(choice) or rowHeight
                 local needed = height + (isHeader and groupHeight or 0)
                 if y + needed > frame.h - padding then break end
                 if isHeader then
@@ -227,23 +275,21 @@ function M.new(hs, config, locale, completion, fallback)
         self.hitRows = {}
         local visibleWindows = {}
         local heading = self.value == "" and locale:text(self.placeholderKey) or self.value .. "│"
-        if self.mode == "switch" then
-            if self.searching then heading = locale:text("switchSearch") .. " " .. self.value .. "│"
-            elseif self.pendingPrefix ~= "" then heading = locale:text("switchPrefix") .. " " .. self.pendingPrefix .. "…"
-            else heading = locale:text("switchLetters") end
-        end
         local elements = {
             { type = "rectangle", action = "fill", roundedRectRadii = { xRadius = 12, yRadius = 12 },
                 fillColor = { white = dark and 0.13 or 0.96, alpha = 0.98 },
                 frame = { x = 0, y = 0, w = frame.w, h = frame.h } },
-            text(heading,
-                20, 17, frame.w - 40, 34, self.mode == "switch" and 16 or 23,
-                self.value == "" and muted or foreground),
-            { type = "rectangle", action = "fill", fillColor = { white = 0.5, alpha = 0.25 },
-                frame = { x = 0, y = header - 1, w = frame.w, h = 1 } },
         }
+        if self.mode ~= "switch" then
+            elements[#elements + 1] = text(heading, 20, 17, frame.w - 40, 34, 23,
+                self.value == "" and muted or foreground)
+            elements[#elements + 1] = { type = "rectangle", action = "fill",
+                fillColor = { white = 0.5, alpha = 0.25 },
+                frame = { x = 0, y = header - 1, w = frame.w, h = 1 } }
+        end
         if #self.filtered == 0 then
-            elements[#elements + 1] = text(locale:text("noDestinations"), 20, header + 16, frame.w - 40, 30, 16, muted)
+            elements[#elements + 1] = text(locale:text("noDestinations"), self.mode == "switch" and switchEdge or 20,
+                header + (self.mode == "switch" and switchPadding or 16), frame.w - (self.mode == "switch" and switchEdge * 2 or 40), 30, 16, muted)
         end
         local iconWidth = (config.maxIcons + 1) * config.iconSize
         local textX, columnGap, longestLabel = 20, 24, 0
@@ -255,24 +301,32 @@ function M.new(hs, config, locale, completion, fallback)
         local iconX = math.min(textX + longestLabel + columnGap, frame.w - iconWidth - 76)
         local labelWidth = math.max(1, iconX - textX - columnGap)
         if self.mode == "switch" then
-            iconX = 20
-            labelWidth = math.min(longestLabel, math.max(1, frame.w - 20 - iconX - 10 - math.max(36, (self.shortcutLength or 1) * 10 + 16)))
-            textX = frame.w - 20 - labelWidth
-            self.previewColumn = { x = iconX, w = math.max(1, textX - 10 - iconX) }
+            iconX = switchEdge
+            labelWidth = math.min(longestLabel, math.max(1, frame.w - switchEdge - iconX - labelGap - math.max(36, (self.shortcutLength or 1) * 10 + 16)))
+            textX = frame.w - switchEdge - labelWidth
+            self.previewColumn = { x = iconX, w = math.max(1, textX - labelGap - iconX) }
         end
         for _, entry in ipairs(entries) do
             local y = entry.y
             if entry.heading then
-                elements[#elements + 1] = text(entry.heading, 20, y + 4, frame.w - 40, 20, 12, muted)
+                elements[#elements + 1] = text(entry.heading, self.mode == "switch" and switchEdge or 20, y + (self.mode == "switch" and 2 or 4), frame.w - (self.mode == "switch" and switchEdge * 2 or 40), 20, 12, muted)
             else
                 local index, choice = entry.index, entry.choice
                 local rowHeight = entry.height
-                self.hitRows[#self.hitRows + 1] = { index = index, top = y, bottom = y + rowHeight - 2 }
+                local rowGap = self.mode == "switch" and 1 or 2
+                self.hitRows[#self.hitRows + 1] = { index = index, top = y, bottom = y + rowHeight - rowGap }
                 if index == self.row then
                     elements[#elements + 1] = { type = "rectangle", action = "fill",
                         roundedRectRadii = { xRadius = 7, yRadius = 7 },
                         fillColor = { white = dark and 1 or 0, alpha = 0.12 },
-                        frame = { x = padding, y = y, w = frame.w - padding * 2, h = rowHeight - 2 } }
+                        frame = { x = padding, y = y, w = frame.w - padding * 2, h = rowHeight - rowGap } }
+                end
+                if self.mode == "switch" and choice.workspaceId and choice.windows and #choice.windows == 0 then
+                    elements[#elements + 1] = { type = "rectangle", action = "stroke", strokeWidth = 1,
+                        roundedRectRadii = { xRadius = 7, yRadius = 7 },
+                        strokeColor = { white = 0.5, alpha = 0.65 },
+                        frame = { x = padding + 0.5, y = y + 0.5,
+                            w = frame.w - padding * 2 - 1, h = rowHeight - rowGap - 1 } }
                 end
                 if self.mode == "switch" and choice.workspaceId then
                     local column = self.previewColumn
@@ -280,7 +334,7 @@ function M.new(hs, config, locale, completion, fallback)
                     local totalWidth = 0
                     for i, window in ipairs(windows) do
                         visibleWindows[#visibleWindows + 1] = window
-                        totalWidth = totalWidth + self.previews:get(window).width + (i > 1 and 12 or 0)
+                        totalWidth = totalWidth + self.previews:get(window).width + (i > 1 and previewGap or 0)
                     end
                     local maxOffset = math.max(0, totalWidth - column.w)
                     local scroll = math.max(0, math.min(self.previews.offsets[choice.workspaceId] or 0, maxOffset))
@@ -293,21 +347,19 @@ function M.new(hs, config, locale, completion, fallback)
                                 elseif left + width > scroll + column.w then scroll = left + width - column.w end
                                 break
                             end
-                            left = left + width + 12
+                            left = left + width + previewGap
                         end
                         scroll = math.max(0, math.min(scroll, maxOffset))
                     end
                     self.previews.offsets[choice.workspaceId] = scroll
                     self.hitRows[#self.hitRows].maxPreviewOffset = maxOffset
-                    local previewY, previewX = y + 12, column.x - scroll
+                    local previewY, previewX = y + 6, column.x - scroll
                     elements[#elements + 1] = { type = "rectangle", action = "clip",
                         frame = { x = column.x, y = #windows > 0 and previewY or y,
                             w = column.w, h = #windows > 0 and Previews.height or rowHeight } }
                     self.hitRows[#self.hitRows].previews = {}
                     if #windows == 0 then
-                        if choice.windows then
-                            self:badge(elements, targetKey(choice), column.x + column.w / 2, y + rowHeight / 2)
-                        else
+                        if not choice.windows then
                             elements[#elements + 1] = text(locale:text("loadingPreviews"),
                                 column.x, y + (rowHeight - 24) / 2, column.w, 24, 16, muted)
                         end
@@ -336,7 +388,7 @@ function M.new(hs, config, locale, completion, fallback)
                             end
                             self:badge(elements, targetKey(choice, window), previewX + preview.width / 2, previewY + Previews.height / 2)
                         end
-                        previewX = previewX + preview.width + 12
+                        previewX = previewX + preview.width + previewGap
                     end
                     elements[#elements + 1] = { type = "resetClip" }
                 elseif choice.image then
@@ -454,12 +506,12 @@ function M.new(hs, config, locale, completion, fallback)
         canvas:replaceElements()
     end
     function self:cancel() self:hide(); completion(nil); return self end
-    function self:select(row, windowIndex)
+    function self:select(row, windowIndex, workspaceOnly)
         local choice = self:selectedRowContents(row)
         if not choice.workspaceId or choice.valid == false then return end
         if self.mode == "switch" then
             if not choice.windows then return end
-            if #choice.windows > 0 then
+            if #choice.windows > 0 and not workspaceOnly then
                 local window = choice.windows[windowIndex or self.windowIndex]
                 if not window or not window.id or not window.windowId then return end
                 choice = { workspaceId = choice.workspaceId, window = { id = window.id, windowId = window.windowId } }
@@ -487,6 +539,7 @@ function M.new(hs, config, locale, completion, fallback)
             local id = choice.displayId or choice.displayName or ""
             if choice.workspaceId and not groups[id] then groups[id] = true; groupCount = groupCount + 1 end
         end
+        self.showDisplayNames = hs.screen.allScreens and #hs.screen.allScreens() > 1 or (not hs.screen.allScreens and groupCount > 1)
         local height = math.min(screen.h - 80, header + padding * 2 + config.rows * rowHeight
             + math.min(config.rows, groupCount) * groupHeight)
         if self.mode == "switch" then height = screen.h - 80 end
@@ -600,25 +653,21 @@ function M.new(hs, config, locale, completion, fallback)
         local unmodified = not flags.cmd and not flags.ctrl and not flags.alt and not flags.shift and not flags.fn
         if self.mode == "switch" and code == keys.escape then
             if self.pendingPrefix ~= "" then self:resetSequence(true)
-            elseif self.searching then
-                self:resetSequence()
-                self.searching = false
-                self:query(""); self:draw()
             else self:cancel() end
-        elseif self.mode == "switch" and not self.searching and unmodified and code == slashCode then
-            self:resetSequence()
-            self.searching = true
-            self:draw()
-        elseif self.mode == "switch" and not self.searching and unmodified and letterByCode[code] then
+        elseif self.mode == "switch" and unmodified and numberByCode[code] then
+            self:number(numberByCode[code])
+        elseif self.mode == "switch" and unmodified and letterByCode[code] then
             self:letter(letterByCode[code])
+        elseif self.mode == "switch" and unmodified and (code == keys["return"] or code == keys.padenter or code == 49) then
+            self:select(nil, nil, true)
         elseif code == keys.escape then self:cancel()
         elseif code == keys["return"] or code == keys.padenter then self:select()
         elseif code == keys.up then self:moveSelection(-1)
         elseif code == keys.down then self:moveSelection(1)
         elseif self.mode == "switch" and code == keys.left then self:moveWindow(-1)
         elseif self.mode == "switch" and code == keys.right then self:moveWindow(1)
-        elseif self.mode == "switch" and not self.searching then
-            -- Letter mode accepts only navigation and unmodified workspace letters.
+        elseif self.mode == "switch" then
+            -- Switch mode accepts window letters, workspace numbers, and navigation.
             return true
         elseif flags.cmd and code == selectAllCode then self:query("")
         elseif flags.cmd and code == pasteCode then

@@ -1,5 +1,5 @@
 -- Previews stay in memory until the helper stops.
-local M = { height = 110 }
+local M = { height = 90 }
 local function ratio(size)
     local w, h = size and size.w, size and size.h
     if type(w) == "number" and type(h) == "number" and w > 0 and h > 0

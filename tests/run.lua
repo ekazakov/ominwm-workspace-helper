@@ -345,7 +345,7 @@ local function picker(count, mode, overrides)
         { text = function(_, key) return key end }, function(choice) selected = choice end)
     local items = {}
     for i = 1, count do
-        items[i] = { workspaceId = "ws" .. i, text = "Workspace " .. i, displayId = "display", displayName = "Display", windows = {} }
+        items[i] = { workspaceId = "ws" .. i, text = "Workspace " .. i, displayId = "display", displayName = "Display", number = i, windows = { { id = "ws" .. i, windowId = i } } }
     end
     ui:begin(mode or "switch"):choices(items):show()
     local function key(code, flags, value, kind, repeated)
@@ -364,7 +364,7 @@ test("switch letters follow display grouping and physical key positions", functi
     local _, ui, key, selected, items = picker(3)
     items[1].displayId, items[2].displayId, items[3].displayId = "one", "two", "one"
     ui:begin("switch"):choices(items)
-    eq(ui.shortcuts.ws1, "a"); eq(ui.shortcuts.ws3, "s"); eq(ui.shortcuts.ws2, "d")
+    eq(ui.shortcuts["window:ws1:1"], "a"); eq(ui.shortcuts["window:ws3:3"], "s"); eq(ui.shortcuts["window:ws2:2"], "d")
     eq(hasText(ui, "A"), true); eq(hasText(ui, "⌘1"), false)
     key(1, {}, "ы")
     eq(selected().workspaceId, "ws3"); eq(ui.visible, false)
@@ -377,13 +377,13 @@ test("switch ignores modifiers, key-up and Command-number but passes opening hot
     eq(key(13, { ctrl = true, alt = true, shift = true }), false)
     key(0, {}, "a"); eq(selected().workspaceId, "ws1")
 end)
-test("26 workspaces use single letters and 27 use two letters", function()
+test("26 windows use single letters and 27 use two letters", function()
     local _, ui, key, selected = picker(26)
-    eq(ui.shortcuts.ws26, "m"); key(46); eq(selected().workspaceId, "ws26")
+    eq(ui.shortcuts["window:ws26:26"], "m"); key(46); eq(selected().workspaceId, "ws26")
     local _, two, press, choice = picker(27)
-    eq(two.shortcuts.ws1, "aa"); eq(two.shortcuts.ws26, "am"); eq(two.shortcuts.ws27, "sa")
+    eq(two.shortcuts["window:ws1:1"], "aa"); eq(two.shortcuts["window:ws26:26"], "am"); eq(two.shortcuts["window:ws27:27"], "sa")
     press(1); eq(choice(), nil); eq(two.pendingPrefix, "s")
-    eq(hasText(two, "switchPrefix s…"), true)
+    eq(hasText(two, "switchPrefix s…"), false)
     press(0); eq(choice().workspaceId, "ws27")
 end)
 test("invalid prefixes and Escape clear pending input without closing", function()
@@ -392,42 +392,38 @@ test("invalid prefixes and Escape clear pending input without closing", function
     key(0); key(53); eq(ui.visible, true); eq(ui.pendingPrefix, "")
     key(53); eq(ui.visible, false)
 end)
-test("search accepts text and Enter while Escape restores letter mode", function()
-    local _, ui, key, selected = picker(3)
-    key(44); eq(ui.searching, true); eq(ui:query(), "")
-    key(0, {}, "Workspace 3"); eq(ui:query(), "Workspace 3")
-    eq(ui.shortcuts.ws3, "d"); eq(hasText(ui, "D"), true)
-    key(18, { cmd = true }, "1"); eq(selected(), nil)
-    key(53); eq(ui.searching, false); eq(ui:query(), ""); eq(ui.visible, true)
-    key(44); key(0, {}, "Workspace 2"); key(36)
-    eq(selected().workspaceId, "ws2")
+test("switch panel has no search bar or search mode", function()
+    local _, ui, key = picker(3)
+    eq(hasText(ui, "switchLetters"), false)
+    eq(hasText(ui, "switchPlaceholder"), false)
+    key(44); eq(ui.searching, false); eq(ui:query(), "")
 end)
 test("refresh reserves removed letters and assigns new identities without remapping", function()
     local _, ui, key, _, items = picker(3)
-    key(44); key(0, {}, "Workspace 3")
-    ui:choices({ items[3], items[1], { workspaceId = "new", text = "New", displayId = "display", windows = {} } })
-    eq(ui.shortcuts.ws3, "d"); eq(ui.shortcuts.ws1, "a")
-    eq(ui.shortcuts.ws2, "s"); eq(ui.shortcuts.new, "f")
-    eq(ui:query(), "Workspace 3"); eq(ui.searching, true)
+    ui:query("Workspace 3")
+    ui:choices({ items[3], items[1], { workspaceId = "new", text = "New", displayId = "display", windows = { { id = "new", windowId = 1000 } } } })
+    eq(ui.shortcuts["window:ws3:3"], "d"); eq(ui.shortcuts["window:ws1:1"], "a")
+    eq(ui.shortcuts["window:ws2:2"], "s"); eq(ui.shortcuts["window:new:1000"], "f")
+    eq(ui:query(), "Workspace 3"); eq(ui.searching, false)
     ui:begin("switch"):choices({ items[3], items[1] })
-    eq(ui.shortcuts.ws3, "a"); eq(ui.pendingPrefix, ""); eq(ui.searching, false)
+    eq(ui.shortcuts["window:ws3:3"], "a"); eq(ui.pendingPrefix, ""); eq(ui.searching, false)
 end)
 test("loading rows do not allocate shortcuts and later refresh increases shortcut length when needed", function()
     local _, ui, key, selected, items = picker(27)
     ui:begin("switch"):choices({ { text = "Loading", valid = false } })
     eq(ui.shortcutLength, nil); eq(ui.shortcutCount, 0)
-    ui:choices({ items[1] }); eq(ui.shortcuts.ws1, "a")
-    ui:choices(items); eq(ui.shortcutLength, 2); eq(ui.shortcuts.ws27, "sa")
+    ui:choices({ items[1] }); eq(ui.shortcuts["window:ws1:1"], "a")
+    ui:choices(items); eq(ui.shortcutLength, 2); eq(ui.shortcuts["window:ws27:27"], "sa")
     key(125); eq(ui.visible, true); eq(selected(), nil)
     ui:selectedRow(27); key(36); eq(selected().workspaceId, "ws27")
 end)
 test("shortcuts expand to three letters above 676 targets", function()
     local _, ui, key, selected = picker(677)
-    eq(ui.shortcutCount, 677); eq(ui.shortcuts.ws676, "amm"); eq(ui.shortcuts.ws677, "saa")
-    ui:selectedRow(100); eq(ui.shortcuts.ws1, "aaa")
+    eq(ui.shortcutCount, 677); eq(ui.shortcuts["window:ws676:676"], "amm"); eq(ui.shortcuts["window:ws677:677"], "saa")
+    ui:selectedRow(100); eq(ui.shortcuts["window:ws1:1"], "aaa")
     key(0); key(46); key(46); eq(selected().workspaceId, "ws676")
     local _, extra, press, choice = picker(677)
-    press(44); press(0, {}, "Workspace 677"); press(36)
+    extra:selectedRow(677); press(36)
     eq(choice().workspaceId, "ws677")
 end)
 test("move panel retains typing search and Command-number selection", function()
@@ -446,10 +442,10 @@ test("switch keyboard selection dispatches a workspace switch and reopening rese
             getKeyCode = function() return code end, getFlags = function() return {} end,
             getUnicodeString = function() return "" end })
     end
-    press(2); e:flush()
+    ui:selectedRow(3); press(36); e:flush()
     eq(e:moves()[1][2], "switch-workspace"); eq(e:moves()[1][3], "12")
     instance:toggleSwitch(); e:flush(); press(44)
-    eq(ui.searching, true)
+    eq(ui.searching, false)
     instance:toggle(); e:flush()
     eq(ui.mode, "move"); eq(ui.searching, false); eq(ui.shortcutCount, 0)
     instance:toggleSwitch(); e:flush()
@@ -486,9 +482,9 @@ test("snapshot queue captures one window per turn with proportional image dimens
     e.snapshots[1] = { w = 1600, h = 900 }; e.snapshots[2] = { w = 600, h = 1200 }
     previews:update(windows); eq(#e.captures, 0)
     e:previewFrame(); eq(#e.captures, 1); eq(changed, 0)
-    assert(math.abs(previews:get(windows[1]).width - 110 * 1600 / 900) < 0.001)
-    eq(previews:get(windows[1]).image:size().h, 110)
-    e:flushPreviews(); eq(#e.captures, 2); eq(changed, 1); eq(previews:get(windows[2]).width, 55)
+    assert(math.abs(previews:get(windows[1]).width - 90 * 1600 / 900) < 0.001)
+    eq(previews:get(windows[1]).image:size().h, 90)
+    e:flushPreviews(); eq(#e.captures, 2); eq(changed, 1); eq(previews:get(windows[2]).width, 45)
     previews:update(windows); e:flushPreviews(); eq(#e.captures, 2)
 end)
 test("failed snapshots use icons and dimensions or a square without retrying", function()
@@ -500,8 +496,8 @@ test("failed snapshots use icons and dimensions or a square without retrying", f
         function() fallbacks = fallbacks + 1; return { icon = true } end)
     e.snapshots[1] = "throw"
     previews:update(windows); e:flushPreviews()
-    eq(fallbacks, 3); eq(previews:get(windows[1]).width, 220)
-    eq(previews:get(windows[2]).width, 110); eq(previews:get(windows[1]).fallback, true)
+    eq(fallbacks, 3); eq(previews:get(windows[1]).width, 180)
+    eq(previews:get(windows[2]).width, 90); eq(previews:get(windows[1]).fallback, true)
     previews:update(windows); e:flushPreviews(); eq(fallbacks, 3)
 end)
 test("snapshot queue reprioritizes visible windows and ignores cancelled callbacks", function()
@@ -546,20 +542,20 @@ local function scrollPreview(ui, hit, xDelta, yDelta, shift, x)
         location = function() return { x = x or (ui.frame.x + ui.previewColumn.x + 10),
             y = ui.frame.y + hit.top + 20 } end })
 end
-test("preview layout has 110px images and clips only the middle column", function()
+test("preview layout has 90px images and clips only the middle column", function()
     local e, ui, _, _, items = picker(8)
     previewRows(ui, items, 2)
     e.snapshots[101] = { w = 2000, h = 500 }
     e:flushPreviews()
-    eq(ui.frame.w, 2 * 440 + 12 + 100 + 50); eq(ui.frame.h, 820)
-    eq(ui.hitRows[1].bottom - ui.hitRows[1].top, 132)
+    eq(ui.frame.w, 2 * 360 + 6 + 100 + 25); eq(ui.frame.h, 820)
+    eq(ui.hitRows[1].bottom - ui.hitRows[1].top, 101)
     local clipCount, resets, images = 0, 0, 0
     for _, el in ipairs(ui.canvas.elements) do
         if el.action == "clip" then
-            clipCount = clipCount + 1; eq(el.frame.w, ui.previewColumn.w); eq(el.frame.h, 110)
+            clipCount = clipCount + 1; eq(el.frame.w, ui.previewColumn.w); eq(el.frame.h, 90)
         elseif el.type == "resetClip" then resets = resets + 1
         elseif el.type == "image" and el.image.snapshotId then
-            eq(el.frame.h, 110); eq(el.frame.w, 440); images = images + 1
+            eq(el.frame.h, 90); eq(el.frame.w, 360); images = images + 1
         end
     end
     eq(clipCount, #ui.hitRows); eq(resets, clipCount); eq(images, 1)
@@ -579,16 +575,16 @@ test("horizontal preview scrolling is per workspace and clamps without changing 
     eq(ui.previews.offsets.ws1, 200)
     scrollPreview(ui, first, -100000, 0); eq(ui.previews.offsets.ws1, first.maxPreviewOffset)
     scrollPreview(ui, first, 100000, 0); eq(ui.previews.offsets.ws1, 0)
-    scrollPreview(ui, first, -10, 0, false, ui.frame.x + 10); eq(ui.previews.offsets.ws1, 0)
+    scrollPreview(ui, first, -10, 0, false, ui.frame.x + 5); eq(ui.previews.offsets.ws1, 0)
     scrollPreview(ui, first, 0, -1); eq(ui.row, 2)
     ui:cancel(); e:flushPreviews(); eq(#e.captures, 0)
 end)
-test("clicking a preview selects its workspace and empty workspaces show a message", function()
+test("empty workspace rows have no letter badges and accept clicks", function()
     local _, ui, _, selected, items = picker(2)
-    previewRows(ui, items, 0); eq(hasText(ui, "A"), true)
+    previewRows(ui, items, 0); eq(hasText(ui, "A"), false)
     local hit = ui.hitRows[2]
     ui.tap.callback({ getType = function() return 1 end,
-        location = function() return { x = ui.frame.x + ui.previewColumn.x + 10, y = ui.frame.y + hit.top + 30 } end })
+        location = function() return { x = ui.frame.x + ui.previewColumn.x + 10, y = ui.frame.y + hit.top + 15 } end })
     eq(selected().workspaceId, "ws2")
 end)
 test("switch preview refresh includes new windows even when refreshOnOpen is false", function()
@@ -628,19 +624,19 @@ test("mixed preview rows compact empty workspaces and keep controls centered", f
     items[2].windows = { { id = "window", windowId = 101 } }
     ui:choices(items)
     local first, second, third = ui.hitRows[1], ui.hitRows[2], ui.hitRows[3]
-    eq(first.bottom - first.top + 2, 45)
-    eq(second.bottom - second.top + 2, 134)
-    eq(second.top - first.top, 45); eq(third.top - second.top, 134)
+    eq(first.bottom - first.top + 1, 31)
+    eq(second.bottom - second.top + 1, 102)
+    eq(second.top - first.top, 31); eq(third.top - second.top, 102)
     eq(#ui.hitRows, 9)
     for _, el in ipairs(ui.canvas.elements) do
         if el.text == "Workspace 1" then
             eq(el.frame.w, items[1].labelWidth)
-            eq(el.frame.x - (ui.previewColumn.x + ui.previewColumn.w), 10)
-            eq(el.frame.y, first.top + (45 - 24) / 2)
-        elseif el.text == "A" then eq(el.frame.y, first.top + (45 - 36) / 2 + 7) end
+            eq(el.frame.x - (ui.previewColumn.x + ui.previewColumn.w), 5)
+            eq(el.frame.y, first.top + (31 - 24) / 2)
+        elseif el.text == "A" then eq(el.frame.y, first.top + (31 - 36) / 2 + 7) end
     end
     items[2].windows = {}; ui:choices(items)
-    eq(ui.hitRows[2].bottom - ui.hitRows[2].top + 2, 45)
+    eq(ui.hitRows[2].bottom - ui.hitRows[2].top + 1, 31)
     ui:selectedRow(9); eq(ui.hitRows[#ui.hitRows].index, 9)
 end)
 
@@ -759,12 +755,12 @@ test("partial input hides typed characters and unrelated badges until timeout", 
     local _, ui, key = picker(27)
     key(0); eq(ui.pendingPrefix, "a")
     local matching, unrelated = {}, {}
-    ui:badge(matching, "ws2", 100, 100); ui:badge(unrelated, "ws27", 100, 100)
+    ui:badge(matching, "window:ws2:2", 100, 100); ui:badge(unrelated, "window:ws27:27", 100, 100)
     eq(matching[2].text, "S"); eq(#unrelated, 0)
     eq(ui.sequenceTimer.delay, 0.3)
     ui.sequenceTimer.callback()
     eq(ui.pendingPrefix, ""); eq(ui.sequenceTimer, nil)
-    local restored = {}; ui:badge(restored, "ws2", 100, 100); eq(restored[2].text, "AS")
+    local restored = {}; ui:badge(restored, "window:ws2:2", 100, 100); eq(restored[2].text, "AS")
 end)
 test("three-letter shortcuts restart the configurable timer after each correct letter", function()
     local e, ui, key, selected = picker(677, "switch", { shortcutSequenceTimeoutMs = 500 })
@@ -792,8 +788,8 @@ test("repeated key-down events cannot finish a shortcut", function()
     eq(ui.pendingPrefix, "a"); eq(selected(), nil); eq(ui.sequenceTimer, timer)
     key(0); eq(selected().workspaceId, "ws1")
 end)
-test("navigation search and closing reset prefixes and cancel pending timers", function()
-    for _, code in ipairs({ 123, 124, 125, 126, 44, 53 }) do
+test("navigation and closing reset prefixes and cancel pending timers", function()
+    for _, code in ipairs({ 123, 124, 125, 126, 53 }) do
         local _, ui, key = picker(27)
         key(0); local timer = ui.sequenceTimer
         key(code); eq(ui.pendingPrefix, ""); eq(timer.active, false)
@@ -814,7 +810,7 @@ test("window arrows clamp and reveal the selected preview while rows wrap", func
     key(125); eq(ui.row, 2); eq(ui.windowIndex, 1)
     key(125); eq(ui.row, 3); eq(ui.windowIndex, 1)
     key(125); eq(ui.row, 1); key(124); key(36)
-    eq(selected().window.id, items[1].windows[2].id)
+    eq(selected().workspaceId, "ws1"); eq(selected().window, nil)
 end)
 test("preview clicks activate that window but workspace label clicks only highlight", function()
     local _, ui, _, selected, items = picker(2)
@@ -840,19 +836,19 @@ test("badges center on previews and empty placeholders with unchanged style", fu
         if element.text == label then
             found = true
             eq(element.frame.x + element.frame.w / 2, (preview.left + preview.right) / 2)
-            eq(element.frame.y + element.frame.h / 2, hit.top + 12 + 110 / 2)
+            eq(element.frame.y + element.frame.h / 2, hit.top + 6 + 90 / 2)
             local square = ui.canvas.elements[i - 1]
             eq(square.fillColor.alpha, 0.4); eq(square.roundedRectRadii.xRadius, 8)
         end
     end
-    eq(found, true); eq(ui.previewColumn.x, 20)
+    eq(found, true); eq(ui.previewColumn.x, 10)
 end)
 test("capacity growth rebuilds uniform shortcuts and resets pending input", function()
     local _, ui, key, _, items = picker(676)
     key(0); local timer = ui.sequenceTimer
-    items[677] = { workspaceId = "added", text = "New", displayId = "display", windows = {} }
+    items[677] = { workspaceId = "added", text = "New", displayId = "display", windows = { { id = "added", windowId = 1000 } } }
     ui:choices(items)
-    eq(ui.shortcutLength, 3); eq(ui.shortcuts.ws1, "aaa"); eq(ui.shortcuts.added, "saa")
+    eq(ui.shortcutLength, 3); eq(ui.shortcuts["window:ws1:1"], "aaa"); eq(ui.shortcuts["window:added:1000"], "saa")
     eq(ui.pendingPrefix, ""); eq(timer.active, false)
 end)
 test("window shortcuts and selection survive reordering without swapping window identity", function()
@@ -877,9 +873,9 @@ test("switch width fits preview rows and labels and caps at 80 percent", functio
     items[1].windows = { { id = "wide", windowId = 1, frame = { w = 1000, h = 500 } } }
     items[2].windows = { { id = "portrait", windowId = 2, frame = { w = 500, h = 1000 } } }
     ui:choices(items)
-    eq(ui.frame.w, 220 + 100 + 50)
+    eq(ui.frame.w, 180 + 100 + 25)
     eq(ui.frame.x, (1440 - ui.frame.w) / 2)
-    eq(ui.previewColumn.w, 220)
+    eq(ui.previewColumn.w, 180)
     items[1].windows[2] = { id = "huge", windowId = 3, frame = { w = 10000, h = 500 } }
     ui:choices(items)
     eq(ui.frame.w, 1440 * 0.8)
@@ -887,10 +883,10 @@ test("switch width fits preview rows and labels and caps at 80 percent", functio
     ui:query("Workspace 2"); eq(ui.frame.w, 1440 * 0.8)
     ui:query("")
     items[1].windows = {}; ui:choices(items)
-    eq(ui.frame.w, 55 + 100 + 50)
+    eq(ui.frame.w, 45 + 100 + 25)
     e.snapshots[2] = { w = 1000, h = 500 }
     e:flushPreviews()
-    eq(ui.frame.w, 220 + 100 + 50)
+    eq(ui.frame.w, 180 + 100 + 25)
     eq(ui.frame.x, (1440 - ui.frame.w) / 2)
 end)
 
@@ -948,7 +944,7 @@ end)
 test("double-press timeout is configurable and stop ignores expired timers", function()
     local e, controller, _, tap, count = gesture({ modifiers = { "ctrl", "alt", "shift" }, intervalMs = 350 })
     tap(); eq(controller.timer.delay, 0.35)
-    e.now = e.now + 220000000; tap(); eq(count(), 1)
+    e.now = e.now + 180000000; tap(); eq(count(), 1)
     tap(); local timer = controller.timer
     controller:stop(); eq(timer.active, false); timer.callback(); eq(count(), 1)
 end)
@@ -1016,6 +1012,92 @@ test("Right Command shortcuts and extra modifiers cannot count as taps", functio
     tap(); eq(count(), 0)
     event({ cmd = true, shift = true }, 12, 54); event({}, 12, 54)
     tap(); eq(count(), 0); tap(); eq(count(), 1)
+end)
+
+test("empty workspaces have no letters and numbers use workspace numbers", function()
+    local _, ui, key, selected, items = picker(3)
+    items[1].windows = {}; items[1].number = 7
+    items[2].number = 12; items[3].number = 2
+    ui:begin("switch"):choices(items)
+    eq(ui.shortcuts.ws1, nil); eq(ui.shortcutCount, 2)
+    key(26); eq(selected().workspaceId, "ws1"); eq(selected().window, nil)
+end)
+test("number sequences switch to double digit workspaces", function()
+    local _, ui, key, selected, items = picker(12)
+    key(18); eq(selected(), nil)
+    key(19); eq(selected().workspaceId, "ws12"); eq(selected().window, nil)
+end)
+test("ambiguous number commits after timeout and navigation cancels it", function()
+    local _, ui, key, selected = picker(12)
+    key(18); ui.numberTimer.callback()
+    eq(selected().workspaceId, "ws1"); eq(selected().window, nil)
+    local _, other, press, choice = picker(12)
+    press(18); local timer = other.numberTimer
+    press(125); eq(timer.active, false); timer.callback(); eq(choice(), nil)
+end)
+test("Enter and Space switch selected rows without targeting a window", function()
+    for _, code in ipairs({36, 49, 76}) do
+        for _, empty in ipairs({false, true}) do
+            local _, ui, key, selected, items = picker(3)
+            if empty then items[2].windows = {}; ui:choices(items) end
+            ui:selectedRow(2); key(code)
+            eq(selected().workspaceId, "ws2"); eq(selected().window, nil)
+        end
+    end
+end)
+test("display names appear only with multiple connected displays", function()
+    local e, ui, _, _, items = picker(3)
+    e.hs.screen.allScreens = function() return { {} } end
+    ui:show(); eq(hasText(ui, "Display"), false)
+    eq(ui.hitRows[1].top, 6)
+    e.hs.screen.allScreens = function() return { {}, {} } end
+    ui:show(); eq(hasText(ui, "Display"), true)
+end)
+
+test("switch rows show only numbers and empty rows have gray borders", function()
+    local e, instance = app()
+    instance:toggleSwitch(); e:flush()
+    local ui = instance.ui.chooser
+    for _, choice in ipairs(ui.items) do
+        eq(choice.text, tostring(choice.number))
+        eq(hasText(ui, choice.text), true)
+        assert(not choice.text:find("●", 1, true))
+    end
+    instance:stop()
+    local _, panel, _, _, items = picker(2)
+    items[1].windows = {}; panel:choices(items)
+    local empty = panel.hitRows[1]
+    local borders = 0
+    for _, element in ipairs(panel.canvas.elements) do
+        if element.action == "stroke" and element.strokeColor.white == 0.5 then
+            borders = borders + 1
+            eq(element.frame.y, empty.top + 0.5)
+            eq(element.strokeWidth, 1)
+        end
+    end
+    eq(borders, 1)
+end)
+
+test("switch height fits content and updates after filtering and refresh", function()
+    local _, ui, _, _, items = picker(3)
+    eq(ui.frame.h, 12 + 3 * 102)
+    eq(ui.hitRows[1].top, 6)
+    ui:query("Workspace 2"); eq(ui.frame.h, 12 + 102)
+    ui:query(""); eq(ui.frame.h, 12 + 3 * 102)
+    items[2].windows = {}; ui:choices(items)
+    eq(ui.frame.h, 12 + 2 * 102 + 31)
+    ui:choices({}); eq(ui.frame.h, 42)
+end)
+test("content height includes display headings and keeps overflowing rows reachable", function()
+    local e, ui, _, _, items = picker(2)
+    e.hs.screen.allScreens = function() return { {}, {} } end
+    items[2].displayId = "other"
+    ui:choices(items):show(); eq(ui.frame.h, 12 + 2 * 102 + 2 * 24)
+    local _, large = picker(100)
+    eq(large.frame.h, 820)
+    large:selectedRow(100)
+    eq(large.hitRows[#large.hitRows].index, 100)
+    assert(large.hitRows[#large.hitRows].bottom <= large.frame.h - 6)
 end)
 
 print(string.format("\n%d passed, %d failed", passed, failed))
