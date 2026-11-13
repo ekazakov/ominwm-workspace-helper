@@ -80,12 +80,30 @@ function M.new()
             return timer
         end,
     }
-    hs.task = { new = function(path, callback, streamCallback, args)
-        local task = { path = path, callback = callback, streamCallback = streamCallback, args = args }
+    hs.task = { new = function(path, callback, ...)
+        local streamCallback, args
+        if select("#", ...) > 0 then
+            local third, fourth = ...
+            assert(type(third) == "table" or type(third) == "function",
+                "expected table or function for argument 3")
+            if type(third) == "table" then args = third
+            else streamCallback, args = third, fourth end
+        end
+        args = args or {}
+        local task = { path = path, callback = callback, streamCallback = streamCallback, launchArgs = args }
+        if path == "/bin/sh" then
+            task.stdoutPath, task.stderrPath = args[4], args[5]
+            task.args = {}
+            for i = 7, #args do task.args[#task.args + 1] = args[i] end
+        else task.args = args end
+        function task:output(stdout, stderr)
+            local out = assert(io.open(self.stdoutPath, "wb")); out:write(stdout or ""); out:close()
+            local err = assert(io.open(self.stderrPath, "wb")); err:write(stderr or ""); err:close()
+        end
         function task:start()
             if e.failStart then return false end
             e.pending[#e.pending + 1] = self
-            e.calls[#e.calls + 1] = args
+            e.calls[#e.calls + 1] = self.args
             return self
         end
         function task:setCallback(cb) self.callback = cb; return self end
@@ -116,7 +134,8 @@ function M.new()
             else payload = { ok = true, result = {} } end
         end
         local output = type(payload) == "string" and payload or self:token(payload)
-        task.callback(code, output, stderr)
+        if task.stdoutPath then task:output(output, stderr); task.callback(code, "", "")
+        else task.callback(code, output, stderr) end
         self:drain()
     end
     function e:flush()

@@ -154,60 +154,62 @@ test("invalid JSON and nonzero task exits propagate errors", function()
     e:step(function() return { ok = false, message = "IPC unavailable" }, 2 end)
     assert(err:find("IPC unavailable"))
 end)
-test("large streamed JSON is assembled with the completion tail", function()
-    local e, api = cli()
-    local result, err
+test("task constructor rejects an explicit nil stream callback", function()
+    local e = Mock.new()
+    local callback = function() end
+    local args = { "--version" }
+    local task = e.hs.task.new("/usr/bin/true", callback, args)
+    eq(task.launchArgs, args); eq(task.streamCallback, nil)
+    local stream = function() return true end
+    task = e.hs.task.new("/usr/bin/true", callback, stream, args)
+    eq(task.launchArgs, args); eq(task.streamCallback, stream)
+    rejects(function() e.hs.task.new("/usr/bin/true", callback, nil, args) end,
+        "expected table or function for argument 3")
+end)
+test("large CLI responses are read intact from files without streaming callbacks", function()
+    local e, api = cli(); local result, err
     api:query("capabilities", function(value, why) result, err = value, why end)
     local task = e.tasks[1]
-    -- Keep the real pipe-buffer boundary in this regression, even with token JSON.
-    local output = string.rep(" ", 70000) .. e:token(F.envelope("capabilities", F.capabilities))
+    eq(task.path, "/bin/sh"); eq(task.streamCallback, nil)
+    local output = string.rep(" ", 150000) .. e:token(F.envelope("capabilities", F.capabilities))
     local decode = e.hs.json.decode
     e.hs.json.decode = function(value) return decode(value:match("^%s*(.*)$")) end
-    for offset = 1, 65536, 4096 do
-        eq(task.streamCallback(task, output:sub(offset, offset + 4095), ""), true)
-    end
-    eq(result, nil)
-    task.callback(0, output:sub(65537), ""); e:drain()
+    task:output(output, ""); task.callback(0, "", "")
     eq(err, nil); eq(N.capabilities(result), true)
+    eq(io.open(task.stdoutPath, "rb"), nil); eq(io.open(task.stderrPath, "rb"), nil)
     eq(e.timers[1].active, false); eq(next(api.tasks), nil)
 end)
-test("streamed stderr and raw stdout preserve all chunks without duplicate callbacks", function()
-    local e, api = cli()
-    local result, err, count = nil, nil, 0
+test("file capture preserves stderr and raw stdout and reports completion only once", function()
+    local e, api = cli(); local result, err, count = nil, nil, 0
     api:query("windows", function(value, why) result, err = value, why; count = count + 1 end)
     local task = e.tasks[1]
-    task.streamCallback(task, "", "permission ")
-    task.callback(2, "", "denied"); e:drain()
+    task:output("", "permission denied"); task.callback(2, "", "")
     assert(err:find("permission denied")); eq(count, 1); eq(result, nil)
-    task.streamCallback(nil, "ignored", "ignored")
-    eq(count, 1)
+    task.callback(2, "ignored", "ignored"); eq(count, 1)
     api:run({ "version" }, function(value) result = value end, true)
     task = e.tasks[2]
-    task.streamCallback(task, "Omni", "")
-    task.callback(0, "WM", ""); e:drain()
+    task:output("OmniWM", ""); task.callback(0, "", "")
     eq(result, "OmniWM")
 end)
-test("output delivered after termination is collected before parsing", function()
-    local e, api = cli(); local result, err, count
-    count = 0
-    api:query("focused-window", function(value, why)
-        result, err = value, why; count = count + 1
-    end)
+test("missing output files fail once and clean up both files", function()
+    local e, api = cli(); local err
+    api:query("focused-window", function(_, why) err = why end)
     local task = e.tasks[1]
-    local output = e:token(F.envelope("focused-window", F.focused))
+    os.remove(task.stdoutPath)
     task.callback(0, "", "")
-    eq(count, 0)
-    task.streamCallback(nil, output, "")
-    e:drain()
-    eq(err, nil); eq(result, F.focused); eq(count, 1)
-    task.streamCallback(nil, output, "")
-    e:drain(); eq(count, 1)
+    assert(err:find("Cannot read CLI output"))
+    eq(io.open(task.stderrPath, "rb"), nil); eq(next(api.tasks), nil)
 end)
-test("stop cancels deferred parsing after process termination", function()
+test("stop removes output files and ignores late process completion", function()
     local e, api = cli(); local count = 0
     api:query("windows", function() count = count + 1 end)
-    e.tasks[1].callback(0, "", "")
-    api:stop(); e:drain(); eq(count, 0)
+    local task = e.tasks[1]
+    local late = task.callback
+    api:stop()
+    -- A child cancelled before exec can still open its output files before it exits.
+    task:output("late output", "late error")
+    late(0, "", "")
+    eq(count, 0); eq(io.open(task.stdoutPath, "rb"), nil); eq(io.open(task.stderrPath, "rb"), nil)
     for _, timer in ipairs(e.timers) do eq(timer.active, false) end
 end)
 test("timeout reports once; late callbacks and stop cannot continue a transaction", function()
@@ -215,6 +217,7 @@ test("timeout reports once; late callbacks and stop cannot continue a transactio
     api:query("windows", function() count = count + 1 end)
     local task = e.tasks[1]
     e.timers[1].callback(); eq(count, 1); eq(task.terminated, true)
+    eq(io.open(task.stdoutPath, "rb"), nil); eq(io.open(task.stderrPath, "rb"), nil)
     e:step(); eq(count, 1)
     api:query("windows", function() count = count + 1 end)
     api:stop(); e:flush(); eq(count, 1); eq(next(api.tasks), nil)
@@ -223,6 +226,7 @@ test("task launch failure releases timeout and pending references", function()
     local e, api = cli(); e.failStart = true; local err
     api:query("windows", function(_, why) err = why end)
     assert(err); eq(next(api.tasks), nil); eq(e.timers[1].active, false)
+    eq(io.open(e.tasks[1].stdoutPath, "rb"), nil); eq(io.open(e.tasks[1].stderrPath, "rb"), nil)
 end)
 test("refresh falls back from incomplete workspace-bar to windows", function()
     local e, api = cli(); local rows

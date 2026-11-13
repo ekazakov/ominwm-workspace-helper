@@ -174,3 +174,10 @@ lua tests/run.lua
 ```
 
 Интерпретатор нужен только для разработки; установленное расширение исполняет Lua внутри Hammerspoon. Подробности и ручной чеклист — в [docs/TESTING.ru.md](docs/TESTING.ru.md).
+
+
+CLI output capture
+
+The helper captures CLI output in temporary files with owner-only access. It reads stdout and stderr after the process exits. This avoids truncated or reordered JSON from asynchronous pipe callbacks. The helper deletes these files after completion, cancellation, or a timeout.
+
+Run `/opt/homebrew/bin/luajit tests/run.lua` to test the helper. Run `python3 tests/test_task_output.py --live-cli` to test large output and the installed OmniWM capabilities query.

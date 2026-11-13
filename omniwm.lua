@@ -1,5 +1,6 @@
 local prefix = (...):match("^(.*%.)") or ""
 local N = require(prefix .. "normalize")
+local Output = require(prefix .. "task_output")
 local M = {}
 
 local function safe(fn, ...)
@@ -47,58 +48,45 @@ function M.new(hs, config, logger)
             return text:sub(1, 240)
         end
         local request = { done = false }
-        local stdoutChunks, stderrChunks = {}, {}
-        local function collect(stdout, stderr)
-            stdoutChunks[#stdoutChunks + 1] = stdout or ""
-            stderrChunks[#stderrChunks + 1] = stderr or ""
-        end
         local function finish(value, err)
             if request.done or self.stopped then return end
             request.done = true
             if request.timer then request.timer:stop() end
-            if request.drainTimer then request.drainTimer:stop() end
+            if request.output then request.output:cleanup() end
             self.tasks[request] = nil
             if err then logger.w(err) end
             callback(value, err)
         end
-        local ok, task = pcall(hs.task.new, self.path, function(code, stdout, stderr)
-            if request.done or self.stopped then return end
-            -- The completion callback contains only the output not already streamed.
-            collect(stdout, stderr)
-            -- Hammerspoon can deliver a final stream notification after termination.
-            -- Yield one timer interval so queued pipe notifications reach collect().
-            request.drainTimer = hs.timer.doAfter(0.01, function()
-                if request.done or self.stopped then return end
-                stdout, stderr = table.concat(stdoutChunks), table.concat(stderrChunks)
-                local decoded, decodeError
-                if not raw then
-                    -- Empty output cannot be JSON; report it without invoking LuaSkin's decoder.
-                    if (stdout or ""):find("%S") then
-                        decoded, decodeError = safe(hs.json.decode, stdout)
-                    else
-                        decodeError = "empty stdout"
-                    end
-                end
-                if code ~= 0 then
-                    local message = type(decoded) == "table" and (decoded.message or decoded.code)
-                    finish(nil, command .. " (exit " .. code .. "): " .. tostring(message
-                        or ((stderr or ""):find("%S") and preview(stderr)) or preview(stdout)))
-                elseif raw then finish(stdout)
-                elseif not decoded then
-                    finish(nil, "Invalid CLI JSON from " .. command .. " (exit " .. code .. "): "
-                        .. tostring(decodeError or "decoder rejected response")
-                        .. "; stdout=" .. preview(stdout) .. "; stderr=" .. preview(stderr))
-                else
-                    local result, err = safe(N.unwrap, decoded, args[1] == "query" and args[2] or nil)
-                    finish(result, err)
-                end
-            end)
-        end, function(_, stdout, stderr)
-            -- Drain both pipes while the CLI runs. Large responses otherwise block
-            -- the child before it can exit and invoke the completion callback.
-            if not request.done and not self.stopped then collect(stdout, stderr) end
-            return true
-        end, taskArgs)
+        local output, outputError = safe(Output.new, self.path, taskArgs)
+        if not output then finish(nil, "Cannot create CLI output files: " .. tostring(outputError)); return end
+        request.output = output
+        -- exec replaces the shell with the CLI, so cancellation still targets the CLI itself.
+        -- Arguments use positional parameters, never shell interpolation.
+        local ok, task = pcall(hs.task.new, "/bin/sh", function(code, wrapperStdout, wrapperStderr)
+            if request.done or self.stopped then output:cleanup(); return end
+            local captured, readError = safe(function() return { output:read() } end)
+            if not captured then finish(nil, "Cannot read CLI output: " .. tostring(readError)); return end
+            local stdout = captured[1] .. (wrapperStdout or "")
+            local stderr = captured[2] .. (wrapperStderr or "")
+            local decoded, decodeError
+            if not raw then
+                if stdout:find("%S") then decoded, decodeError = safe(hs.json.decode, stdout)
+                else decodeError = "empty stdout" end
+            end
+            if code ~= 0 then
+                local message = type(decoded) == "table" and (decoded.message or decoded.code)
+                finish(nil, command .. " (exit " .. code .. "): " .. tostring(message
+                    or (stderr:find("%S") and preview(stderr)) or preview(stdout)))
+            elseif raw then finish(stdout)
+            elseif not decoded then
+                finish(nil, "Invalid CLI JSON from " .. command .. " (exit " .. code .. "): "
+                    .. tostring(decodeError or "decoder rejected response")
+                    .. "; stdout=" .. preview(stdout) .. "; stderr=" .. preview(stderr))
+            else
+                local result, err = safe(N.unwrap, decoded, args[1] == "query" and args[2] or nil)
+                finish(result, err)
+            end
+        end, output.arguments)
         if not ok or not task then finish(nil, "Cannot create omniwmctl task: " .. tostring(task)); return end
         request.task = task
         self.tasks[request] = true
@@ -280,8 +268,9 @@ function M.new(hs, config, logger)
         for request in pairs(self.tasks) do
             request.done = true
             if request.timer then request.timer:stop() end
-            if request.drainTimer then request.drainTimer:stop() end
-            request.task:setCallback(nil)
+            if request.output then request.output:cleanup() end
+            local output = request.output
+            request.task:setCallback(function() output:cleanup() end)
             request.task:terminate()
         end
         self.tasks = {}
