@@ -92,7 +92,7 @@ function M.mergeWindows(workspaces, payload)
             ws.windows[#ws.windows + 1] = { id = row.id, windowId = tonumber(row.windowId),
                 frame = type(row.frame) == "table" and { w = row.frame.w or row.frame.width,
                     h = row.frame.h or row.frame.height } or nil, bundleId = row.app and row.app.bundleId,
-                appName = row.app and row.app.name }
+                appName = row.app and row.app.name, title = type(row.title) == "string" and row.title or "" }
         end
     end
 end

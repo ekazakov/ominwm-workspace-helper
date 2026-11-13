@@ -42,7 +42,7 @@ function M.new(hs, configuration, callback)
             self.pressedAt, self.invalid = nil, false
             if valid then
                 local timestamp = now()
-                if self.lastTap and timestamp - self.lastTap <= configuration.intervalMs then
+                if self.lastTap and pressedAt - self.lastTap <= configuration.intervalMs then
                     self:reset()
                     callback()
                 else
@@ -55,7 +55,15 @@ function M.new(hs, configuration, callback)
                 end
             elseif pressedAt then self:reset() end
         elseif exact and not self.invalid and not self.pressedAt then
-            self.pressedAt = now()
+            local timestamp = now()
+            if self.lastTap and timestamp - self.lastTap > configuration.intervalMs then self:reset() end
+            -- The second press claims the pending tap before its release.
+            -- Its own hold limit still applies, but the gap timer must not clear it.
+            if self.timer then
+                self.timer:stop(); self.timer = nil
+                self.generation = self.generation + 1
+            end
+            self.pressedAt = timestamp
         end
         return false
     end)

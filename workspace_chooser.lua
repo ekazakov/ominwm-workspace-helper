@@ -69,6 +69,20 @@ function M.new(hs, config, cli, icons, logger)
             end
         end
         if not restored and row and row > 0 then self.chooser:selectedRow(math.min(row, #choices)) end
+        local initialWindowId = self.chooser.initialWindowId
+        if initialWindowId then
+            for i, choice in ipairs(self.chooser.filtered) do
+                for j, window in ipairs(choice.windows or {}) do
+                    if window.windowId == initialWindowId then
+                        self.chooser.initialWindowId = nil
+                        self.chooser:selectedRow(i)
+                        self.chooser.windowIndex, self.chooser.revealSelection = j, true
+                        self.chooser:draw()
+                        return
+                    end
+                end
+            end
+        end
     end
 
     function self:refresh(callback)
@@ -168,6 +182,7 @@ function M.new(hs, config, cli, icons, logger)
         local warm = self.cache ~= nil
         local native = hs.window.frontmostWindow()
         local nativeId = native and native:id()
+        self.chooser.initialWindowId = mode == "switch" and nativeId or nil
         if mode ~= "switch" and not nativeId then self:cancel(); notify("No native window focused"); return end
         local function valid() return not self.stopped and self.active and self.epoch == epoch end
         local function fail(err) if valid() then self:cancel(); notify(err) end end

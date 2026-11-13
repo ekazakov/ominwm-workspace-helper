@@ -66,8 +66,8 @@ function M.new()
     hs.screen = { mainScreen = function()
         return { frame = function() return { x = 0, y = 0, w = 1440, h = 900 } end }
     end }
-    hs.styledtext = { new = function(value)
-        return { lower = function() return { getString = function() return value:lower() end } end }
+    hs.styledtext = { new = function(value, attributes)
+        return { value = value, attributes = attributes, lower = function() return { getString = function() return value:lower() end } end }
     end }
     local tokens, sequence = {}, 0
     hs.json = { encode = encode, decode = function(token) return assert(tokens[token], "invalid JSON") end }

@@ -810,7 +810,7 @@ test("window arrows clamp and reveal the selected preview while rows wrap", func
     key(125); eq(ui.row, 2); eq(ui.windowIndex, 1)
     key(125); eq(ui.row, 3); eq(ui.windowIndex, 1)
     key(125); eq(ui.row, 1); key(124); key(36)
-    eq(selected().workspaceId, "ws1"); eq(selected().window, nil)
+    eq(selected().workspaceId, "ws1"); eq(selected().window.id, items[1].windows[2].id)
 end)
 test("preview clicks activate that window but workspace label clicks only highlight", function()
     local _, ui, _, selected, items = picker(2)
@@ -883,7 +883,7 @@ test("switch width fits preview rows and labels and caps at 80 percent", functio
     ui:query("Workspace 2"); eq(ui.frame.w, 1440 * 0.8)
     ui:query("")
     items[1].windows = {}; ui:choices(items)
-    eq(ui.frame.w, 45 + 100 + 25)
+    eq(ui.frame.w, 144 + 100 + 25)
     e.snapshots[2] = { w = 1000, h = 500 }
     e:flushPreviews()
     eq(ui.frame.w, 180 + 100 + 25)
@@ -1003,6 +1003,27 @@ test("physical Right Command double press ignores Left Command and mixed sides",
     event({}, 12, 55)
     tap(54); eq(count(), 1); tap(54); eq(count(), 2)
 end)
+test("second Command press can finish after the inter-tap deadline", function()
+    local e, controller, event, _, count = gesture({ modifiers = { "cmd" }, keyCode = 54, intervalMs = 200 })
+    event({ cmd = true }); event({})
+    local expiry = controller.timer
+    e.now = e.now + 100000000
+    event({ cmd = true })
+    eq(expiry.active, false)
+    expiry.callback() -- A queued callback must not clear the second press.
+    e.now = e.now + 150000000
+    event({}); eq(count(), 1)
+end)
+test("late second Command presses and long second holds do not toggle", function()
+    for _, latePress in ipairs({ true, false }) do
+        local e, _, event, _, count = gesture({ modifiers = { "cmd" }, keyCode = 54, intervalMs = 200 })
+        event({ cmd = true }); event({})
+        e.now = e.now + (latePress and 210000000 or 100000000)
+        event({ cmd = true })
+        e.now = e.now + (latePress and 10000000 or 210000000)
+        event({}); eq(count(), 0)
+    end
+end)
 test("Right Command shortcuts and extra modifiers cannot count as taps", function()
     local _, _, event, _, count = gesture({ modifiers = { "cmd" }, keyCode = 54, intervalMs = 200 })
     local function tap()
@@ -1035,13 +1056,15 @@ test("ambiguous number commits after timeout and navigation cancels it", functio
     press(18); local timer = other.numberTimer
     press(125); eq(timer.active, false); timer.callback(); eq(choice(), nil)
 end)
-test("Enter and Space switch selected rows without targeting a window", function()
+test("Enter and Space activate windows or switch empty workspaces", function()
     for _, code in ipairs({36, 49, 76}) do
         for _, empty in ipairs({false, true}) do
             local _, ui, key, selected, items = picker(3)
             if empty then items[2].windows = {}; ui:choices(items) end
             ui:selectedRow(2); key(code)
-            eq(selected().workspaceId, "ws2"); eq(selected().window, nil)
+            eq(selected().workspaceId, "ws2")
+            if empty then eq(selected().window, nil)
+            else eq(selected().window.windowId, items[2].windows[1].windowId) end
         end
     end
 end)
@@ -1054,7 +1077,7 @@ test("display names appear only with multiple connected displays", function()
     ui:show(); eq(hasText(ui, "Display"), true)
 end)
 
-test("switch rows show only numbers and empty rows show Empty without borders", function()
+test("switch rows show only numbers and empty rows show gray placeholders without borders", function()
     local e, instance = app()
     instance:toggleSwitch(); e:flush()
     local ui = instance.ui.chooser
@@ -1075,7 +1098,16 @@ test("switch rows show only numbers and empty rows show Empty without borders", 
             eq(element.strokeWidth, 1)
         end
     end
-    eq(borders, 0); eq(hasText(panel, "Empty"), true)
+    eq(borders, 0); eq(hasText(panel, "Empty"), false)
+    local placeholders = 0
+    for _, element in ipairs(panel.canvas.elements) do
+        if element.type == "rectangle" and element.action == "fill" and element.fillColor.alpha == 0.3 then
+            placeholders = placeholders + 1
+            eq(element.frame.w, 144); eq(element.frame.h, 90)
+            eq(element.frame.y, empty.top + 6)
+        end
+    end
+    eq(placeholders, 1)
 end)
 
 test("switch height fits content and updates after filtering and refresh", function()
@@ -1098,6 +1130,87 @@ test("content height includes display headings and keeps overflowing rows reacha
     large:selectedRow(100)
     eq(large.hitRows[#large.hitRows].index, 100)
     assert(large.hitRows[#large.hitRows].bottom <= large.frame.h - 6)
+end)
+
+test("empty placeholders use the workspace display full aspect ratio", function()
+    local e, ui, _, _, items = picker(1)
+    items[1].windows = {}; items[1].displayId = "display:2"
+    e.hs.screen.allScreens = function() return {
+        { id = function() return 1 end, fullFrame = function() return { w = 1920, h = 1080 } end },
+        { id = function() return 2 end, fullFrame = function() return { w = 900, h = 1800 } end },
+    } end
+    ui:choices(items)
+    local found = false
+    for _, element in ipairs(ui.canvas.elements) do
+        if element.type == "rectangle" and element.action == "fill" and element.fillColor.alpha == 0.3 then
+            eq(element.frame.w, 45); eq(element.frame.h, 90); found = true
+        end
+    end
+    eq(found, true)
+end)
+test("window icons sit five pixels inside the preview bottom left", function()
+    local e, instance = app()
+    instance:toggleSwitch(); e:flush()
+    local ui, found = instance.ui.chooser, false
+    for _, hit in ipairs(ui.hitRows) do
+        for _, preview in ipairs(hit.previews or {}) do
+            for _, element in ipairs(ui.canvas.elements) do
+                if element.type == "image" and element.frame.w == 16
+                    and element.frame.x == preview.left + 5 then
+                    eq(element.frame.y, hit.top + 6 + 90 - 16 - 5)
+                    eq(element.frame.h, 16); eq(element.imageAlignment, "bottomLeft")
+                    found = true
+                end
+            end
+        end
+    end
+    eq(found, true); instance:stop()
+end)
+
+test("switch opening selects the focused native window on warm and cold opens", function()
+    for _, cold in ipairs({ false, true }) do
+        local e, instance
+        if cold then
+            e = Mock.new(); _G.hs = e.hs
+            instance = Project.new({ previewRefreshInterval = 0 }):start()
+        else e, instance = app() end
+        e.nativeId = 102
+        instance:toggleSwitch(); e:flush()
+        local ui = instance.ui.chooser
+        eq(ui:selectedRowContents().windows[ui.windowIndex].windowId, 102)
+        ui:moveWindow(-1); instance.ui:refresh(); e:flush()
+        eq(ui:selectedRowContents().windows[ui.windowIndex].windowId, 101)
+        instance:stop()
+    end
+end)
+
+test("preview captions retain Unicode titles and fit beside icons with a shadow", function()
+    local e, instance = app()
+    local title = "Long window title with Unicode 🧪 " .. string.rep("text ", 50)
+    e.records.windows.windows[1].title = title .. "\nnext line"
+    instance:toggleSwitch(); e:flush()
+    local ui, caption = instance.ui.chooser
+    for _, element in ipairs(ui.canvas.elements) do
+        if element.type == "text" and type(element.text) == "table" and element.text.value:find(title, 1, true) then
+            local attributes = element.text.attributes
+            eq(attributes.font.size, 11); eq(attributes.paragraphStyle.lineBreak, "truncateTail")
+            eq(attributes.color.white, 1); eq(attributes.shadow.blurRadius, 3)
+            assert(not element.text.value:find("\n", 1, true))
+            caption = element
+        end
+    end
+    assert(caption)
+    local matched = false
+    for _, hit in ipairs(ui.hitRows) do
+        for _, preview in ipairs(hit.previews or {}) do
+            if caption.frame.x == preview.left + 10 + 16 then
+                eq(caption.frame.x + caption.frame.w, preview.right - 5)
+                eq(caption.frame.y + caption.frame.h / 2, hit.top + 6 + 90 - 5 - 16 / 2)
+                matched = true
+            end
+        end
+    end
+    eq(matched, true); instance:stop()
 end)
 
 print(string.format("\n%d passed, %d failed", passed, failed))

@@ -58,6 +58,7 @@ function M.new(hs, config, locale, completion, fallback)
         self.mode = mode or "move"
         self.placeholderKey = self.mode == "switch" and "switchPlaceholder" or "placeholder"
         self.searching = false
+        self.initialWindowId = nil
         self.shortcuts, self.shortcutCount, self.shortcutLength = {}, 0, nil
         self.value, self.row, self.offset, self.windowIndex = "", 1, 0, 1
         return self
@@ -193,6 +194,18 @@ function M.new(hs, config, locale, completion, fallback)
             { white = 1, alpha = 1 }, "center")
     end
 
+    local function emptyWidth(choice)
+        local screen
+        local displayId = tonumber((choice.displayId or ""):match("^display:(%d+)$"))
+        for _, candidate in ipairs(hs.screen.allScreens and hs.screen.allScreens() or {}) do
+            if (candidate.id and candidate:id() == displayId)
+                or (candidate.name and candidate:name() == choice.displayName) then screen = candidate; break end
+        end
+        screen = screen or hs.screen.mainScreen()
+        local frame = screen.fullFrame and screen:fullFrame() or screen:frame()
+        return Previews.height * frame.w / frame.h
+    end
+
     function self:fitSwitchHeight()
         if self.mode ~= "switch" then return end
         local height, previous = switchPadding * 2, nil
@@ -221,6 +234,7 @@ function M.new(hs, config, locale, completion, fallback)
                 for i, window in ipairs(choice.windows or {}) do
                     width = width + self.previews:get(window).width + (i > 1 and previewGap or 0)
                 end
+                if choice.windows and #choice.windows == 0 then width = emptyWidth(choice) end
                 longestPreview = math.max(longestPreview, width, minimumPreview)
                 longestLabel = math.max(longestLabel, choice.labelWidth or 0)
             end
@@ -353,7 +367,9 @@ function M.new(hs, config, locale, completion, fallback)
                     self.hitRows[#self.hitRows].previews = {}
                     if #windows == 0 then
                         if choice.windows then
-                            elements[#elements + 1] = text("Empty", column.x, y + 6, column.w, 24, 16, muted)
+                            elements[#elements + 1] = { type = "rectangle", action = "fill",
+                                fillColor = { white = 0.5, alpha = 0.3 },
+                                frame = { x = column.x, y = previewY, w = emptyWidth(choice), h = Previews.height } }
                         else
                             elements[#elements + 1] = text(locale:text("loadingPreviews"),
                                 column.x, y + (rowHeight - 24) / 2, column.w, 24, 16, muted)
@@ -371,6 +387,35 @@ function M.new(hs, config, locale, completion, fallback)
                                 elements[#elements + 1] = { type = "image", image = preview.image,
                                     imageScaling = "scaleProportionally", frame = {
                                         x = previewX + (preview.width - w) / 2, y = previewY + (Previews.height - h) / 2, w = w, h = h } }
+                            end
+                        end
+                        if fallback and previewX + preview.width > column.x and previewX < column.x + column.w then
+                            local ok, icon = pcall(fallback, window.bundleId)
+                            if ok and icon then
+                                local size = math.min(16, preview.width - 10, Previews.height - 10)
+                                if size > 0 then
+                                    elements[#elements + 1] = { type = "image", image = icon,
+                                        imageScaling = "scaleProportionally", imageAlignment = "bottomLeft",
+                                        frame = { x = previewX + 5,
+                                            y = previewY + Previews.height - size - 5, w = size, h = size } }
+                                    local title = (window.title or ""):gsub("[%c]", " ")
+                                    local titleWidth = preview.width - size - 15
+                                    if title ~= "" and titleWidth > 0 then
+                                        local titleX = previewX + 5 + size + 5
+                                        local caption = hs.styledtext.new(title, {
+                                            font = { name = ".AppleSystemUIFont", size = 11 },
+                                            color = { white = 1 },
+                                            paragraphStyle = { lineBreak = "truncateTail" },
+                                            shadow = { blurRadius = 3, offset = { w = 0, h = 1 },
+                                                color = { white = 0, alpha = 0.7 } },
+                                        })
+                                        local titleHeight = math.ceil(canvas:minimumTextSize(caption).h)
+                                        local iconY = previewY + Previews.height - size - 5
+                                        elements[#elements + 1] = { type = "text", text = caption,
+                                            frame = { x = titleX, y = iconY + (size - titleHeight) / 2,
+                                                w = titleWidth, h = titleHeight } }
+                                    end
+                                end
                             end
                         end
                         self.hitRows[#self.hitRows].previews[#self.hitRows[#self.hitRows].previews + 1] = {
@@ -555,6 +600,7 @@ function M.new(hs, config, locale, completion, fallback)
         types.scrollWheel }, function(event)
         if not self.visible then return false end
         local kind = event:getType()
+        if kind ~= types.mouseMoved and kind ~= types.keyUp then self.initialWindowId = nil end
         if self.onInput and kind ~= types.mouseMoved and kind ~= types.keyUp then self.onInput(event) end
         if kind == types.mouseMoved then
             local point, f = event:location(), self.frame
@@ -566,6 +612,7 @@ function M.new(hs, config, locale, completion, fallback)
                         if choice and choice.workspaceId and choice.valid ~= false then
                             local windowIndex = self.mode == "switch" and self:previewAt(hit, point.x - f.x)
                             if hit.index ~= self.row or (windowIndex and windowIndex ~= self.windowIndex) then
+                                self.initialWindowId = nil
                                 self:resetSequence()
                                 self.row = hit.index
                                 self.windowIndex = windowIndex or math.max(1, math.min(self.windowIndex, #(choice.windows or {})))
@@ -654,7 +701,7 @@ function M.new(hs, config, locale, completion, fallback)
         elseif self.mode == "switch" and unmodified and letterByCode[code] then
             self:letter(letterByCode[code])
         elseif self.mode == "switch" and unmodified and (code == keys["return"] or code == keys.padenter or code == 49) then
-            self:select(nil, nil, true)
+            self:select()
         elseif code == keys.escape then self:cancel()
         elseif code == keys["return"] or code == keys.padenter then self:select()
         elseif code == keys.up then self:moveSelection(-1)
